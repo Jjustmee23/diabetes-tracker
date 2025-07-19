@@ -71,3 +71,8 @@ restore_*.bat
 start_app.bat
 install_dependencies.bat
 UPDATE_README.md
+
+# Token files (security)
+create_release_with_token.py
+*.token
+*.key
