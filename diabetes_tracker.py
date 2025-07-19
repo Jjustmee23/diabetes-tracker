@@ -38,6 +38,15 @@ except ImportError:
     UPDATE_SYSTEM_AVAILABLE = False
     print("⚠️ Update systeem niet beschikbaar")
 
+# Import patient management
+try:
+    from patient_management import PatientProfile
+    PATIENT_MANAGEMENT_AVAILABLE = True
+    print("✅ Patient management geladen")
+except ImportError:
+    PATIENT_MANAGEMENT_AVAILABLE = False
+    print("⚠️ Patient management niet beschikbaar")
+
 class FirewallSetup:
     """Automatische firewall setup voor de applicatie"""
     
@@ -403,8 +412,11 @@ class DiabetesTracker:
         self.init_database()
         
         # Patiënten management - initialiseer database direct
-        self.patient_profile = PatientProfile(self.root)
-        self.patient_profile.init_patient_database()  # Initialiseer database direct
+        if PATIENT_MANAGEMENT_AVAILABLE:
+            self.patient_profile = PatientProfile(self.root)
+            self.patient_profile.init_patient_database()  # Initialiseer database direct
+        else:
+            self.patient_profile = None
         
         # Nieuwe features initialisatie
         self.notification_manager = NotificationManager(self.root)
