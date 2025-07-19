@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+
+{% block title %}Diabetes Tracker - Analytics{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    {% if insufficient_data %}
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card shadow">
+                    <div class="card-body text-center p-5">
+                        <i class="fas fa-chart-line fa-3x text-muted mb-3"></i>
+                        <h3 class="text-muted">Onvoldoende Data</h3>
+                        <p class="text-muted">
+                            Je hebt minimaal 3 metingen nodig om analytics te kunnen bekijken.
+                        </p>
+                        <a href="{{ url_for('add_reading') }}" class="btn btn-primary">
+                            <i class="fas fa-plus"></i>
+                            Nieuwe Meting Toevoegen
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% else %}
+        <!-- Analytics Overview -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <h3 class="mb-0">
+                            <i class="fas fa-chart-line"></i>
+                            Analytics Overzicht
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3 col-6 mb-3">
+                                <div class="text-center">
+                                    <h4 class="text-primary">{{ "%.1f"|format(analytics.avg_blood) }}</h4>
+                                    <small class="text-muted">Gemiddelde Bloedwaarde</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3 col-6 mb-3">
+                                <div class="text-center">
+                                    <h4 class="text-success">{{ analytics.total_readings }}</h4>
+                                    <small class="text-muted">Totaal Metingen</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3 col-6 mb-3">
+                                <div class="text-center">
+                                    <h4 class="text-danger">{{ "%.1f"|format(analytics.high_risk_percentage) }}%</h4>
+                                    <small class="text-muted">Hoog Risico (>180)</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3 col-6 mb-3">
+                                <div class="text-center">
+                                    <h4 class="text-warning">{{ "%.1f"|format(analytics.low_risk_percentage) }}%</h4>
+                                    <small class="text-muted">Laag Risico (<70)</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="row">
+            <!-- Blood Value Range Chart -->
+            <div class="col-md-6 mb-4">
+                <div class="card shadow h-100">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-chart-pie"></i>
+                            Bloedwaarde Verdeling
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="bloodRangeChart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trend Chart -->
+            <div class="col-md-6 mb-4">
+                <div class="card shadow h-100">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-chart-line"></i>
+                            Trend Analyse
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="trendChart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistics Cards -->
+        <div class="row">
+            <div class="col-md-4 mb-4">
+                <div class="card shadow">
+                    <div class="card-body text-center">
+                        <i class="fas fa-arrow-up fa-2x text-success mb-2"></i>
+                        <h4>{{ "%.1f"|format(analytics.max_blood) }}</h4>
+                        <p class="text-muted">Hoogste Waarde</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-4">
+                <div class="card shadow">
+                    <div class="card-body text-center">
+                        <i class="fas fa-arrow-down fa-2x text-danger mb-2"></i>
+                        <h4>{{ "%.1f"|format(analytics.min_blood) }}</h4>
+                        <p class="text-muted">Laagste Waarde</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-4">
+                <div class="card shadow">
+                    <div class="card-body text-center">
+                        <i class="fas fa-chart-bar fa-2x text-info mb-2"></i>
+                        <h4>{{ "%.1f"|format(analytics.std_blood) }}</h4>
+                        <p class="text-muted">Standaard Deviatie</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recommendations -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card shadow">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">
+                            <i class="fas fa-lightbulb"></i>
+                            Aanbevelingen
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6>Bloedwaarde Analyse:</h6>
+                                <ul class="list-unstyled">
+                                    {% if analytics.avg_blood > 10 %}
+                                        <li><i class="fas fa-exclamation-triangle text-warning"></i> Gemiddelde waarde is hoog</li>
+                                    {% elif analytics.avg_blood < 4 %}
+                                        <li><i class="fas fa-exclamation-triangle text-danger"></i> Gemiddelde waarde is laag</li>
+                                    {% else %}
+                                        <li><i class="fas fa-check text-success"></i> Gemiddelde waarde is goed</li>
+                                    {% endif %}
+                                    
+                                    {% if analytics.high_risk_percentage > 20 %}
+                                        <li><i class="fas fa-exclamation-triangle text-warning"></i> Veel hoge waarden</li>
+                                    {% endif %}
+                                    
+                                    {% if analytics.low_risk_percentage > 10 %}
+                                        <li><i class="fas fa-exclamation-triangle text-danger"></i> Veel lage waarden</li>
+                                    {% endif %}
+                                </ul>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>Trend Analyse:</h6>
+                                {% if analytics.trend %}
+                                    <p>
+                                        <i class="fas fa-arrow-{{ 'up' if analytics.trend == 'stijgend' else 'down' }} text-{{ 'danger' if analytics.trend == 'stijgend' else 'success' }}"></i>
+                                        Trend is {{ analytics.trend }}
+                                        {% if analytics.trend_change %}
+                                            ({{ "%.1f"|format(analytics.trend_change) }} mmol/L)
+                                        {% endif %}
+                                    </p>
+                                {% else %}
+                                    <p><i class="fas fa-minus text-muted"></i> Onvoldoende data voor trend analyse</p>
+                                {% endif %}
+                                
+                                <h6>Algemene Tips:</h6>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-clock text-info"></i> Meet regelmatig op vaste tijden</li>
+                                    <li><i class="fas fa-utensils text-info"></i> Noteer je maaltijden</li>
+                                    <li><i class="fas fa-running text-info"></i> Registreer je activiteiten</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+
+{% if not insufficient_data %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// Blood Range Chart
+const bloodRangeCtx = document.getElementById('bloodRangeChart').getContext('2d');
+new Chart(bloodRangeCtx, {
+    type: 'doughnut',
+    data: {
+        labels: ['Laag (<70)', 'Normaal (70-180)', 'Hoog (>180)'],
+        datasets: [{
+            data: [
+                {{ analytics.low_risk_percentage }},
+                {{ analytics.stable_percentage }},
+                {{ analytics.high_risk_percentage }}
+            ],
+            backgroundColor: [
+                '#dc3545',
+                '#28a745',
+                '#ffc107'
+            ]
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: {
+                position: 'bottom'
+            }
+        }
+    }
+});
+
+// Trend Chart
+const trendCtx = document.getElementById('trendChart').getContext('2d');
+const trendData = {{ data | tojson }};
+const dates = trendData.map(item => item.date);
+const values = trendData.map(item => item.blood_value);
+
+new Chart(trendCtx, {
+    type: 'line',
+    data: {
+        labels: dates,
+        datasets: [{
+            label: 'Bloedwaarde (mmol/L)',
+            data: values,
+            borderColor: '#007bff',
+            backgroundColor: 'rgba(0, 123, 255, 0.1)',
+            tension: 0.1
+        }]
+    },
+    options: {
+        responsive: true,
+        scales: {
+            y: {
+                beginAtZero: false,
+                suggestedMin: Math.min(...values) - 1,
+                suggestedMax: Math.max(...values) + 1
+            }
+        },
+        plugins: {
+            legend: {
+                display: false
+            }
+        }
+    }
+});
+</script>
+{% endif %}
+{% endblock %} 

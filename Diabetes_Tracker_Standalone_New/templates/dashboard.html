@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Diabetes Tracker{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Welcome Section -->
+    <div class="card">
+        <div class="card-body text-center">
+            <h4 class="card-title">
+                <i class="fas fa-tachometer-alt text-primary"></i> Dashboard
+            </h4>
+            <p class="text-muted">Welkom bij je diabetes tracker</p>
+        </div>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="row">
+        <div class="col-6">
+            <div class="stats-card text-center">
+                <i class="fas fa-tint fa-2x mb-2"></i>
+                <h5>{{ "%.1f"|format(stats[2] or 0) }}</h5>
+                <small>Gemiddelde Bloedwaarde</small>
+            </div>
+        </div>
+        <div class="col-6">
+            <div class="stats-card text-center">
+                <i class="fas fa-calendar-check fa-2x mb-2"></i>
+                <h5>{{ stats[0] or 0 }}</h5>
+                <small>Totaal Metingen</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Today Stats -->
+    <div class="card">
+        <div class="card-header bg-success text-white">
+            <h6 class="mb-0"><i class="fas fa-calendar-day"></i> Vandaag</h6>
+        </div>
+        <div class="card-body">
+            <div class="row text-center">
+                <div class="col-6">
+                    <h4 class="text-success">{{ today_stats[0] or 0 }}</h4>
+                    <small class="text-muted">Metingen</small>
+                </div>
+                <div class="col-6">
+                    <h4 class="text-primary">{{ "%.1f"|format(today_stats[1] or 0) }}</h4>
+                    <small class="text-muted">Gemiddelde</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Readings -->
+    <div class="card">
+        <div class="card-header">
+            <h6 class="mb-0"><i class="fas fa-history"></i> Recente Metingen</h6>
+        </div>
+        <div class="card-body">
+            {% if recent_readings %}
+                {% for reading in recent_readings %}
+                <div class="reading-item">
+                    <div class="row align-items-center">
+                        <div class="col-8">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="blood-value 
+                                    {% if reading[2] > 180 %}high-value
+                                    {% elif reading[2] < 70 %}low-value
+                                    {% else %}normal-value{% endif %}">
+                                    {{ reading[2] }} mg/dL
+                                </span>
+                                <small class="text-muted">{{ reading[0] }} {{ reading[1] }}</small>
+                            </div>
+                            {% if reading[3] %}
+                            <div class="mt-1">
+                                <small class="text-muted">
+                                    <i class="fas fa-pills"></i> {{ reading[3] }}
+                                </small>
+                            </div>
+                            {% endif %}
+                            {% if reading[4] %}
+                            <div class="mt-1">
+                                <small class="text-muted">
+                                    <i class="fas fa-running"></i> {{ reading[4] }}
+                                </small>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="col-4 text-end">
+                            {% if reading[5] %}
+                            <small class="text-muted">
+                                <i class="fas fa-weight"></i> {{ reading[5] }} kg
+                            </small>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="text-center text-muted py-4">
+                    <i class="fas fa-plus-circle fa-3x mb-3"></i>
+                    <p>Nog geen metingen toegevoegd</p>
+                    <a href="{{ url_for('add_reading') }}" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Eerste Meting
+                    </a>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="card">
+        <div class="card-header">
+            <h6 class="mb-0"><i class="fas fa-bolt"></i> Snelle Acties</h6>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-6 mb-2">
+                    <a href="{{ url_for('add_reading') }}" class="btn btn-primary w-100">
+                        <i class="fas fa-plus"></i> Nieuwe Meting
+                    </a>
+                </div>
+                <div class="col-6 mb-2">
+                    <a href="{{ url_for('history') }}" class="btn btn-outline-primary w-100">
+                        <i class="fas fa-history"></i> Geschiedenis
+                    </a>
+                </div>
+                <div class="col-6 mb-2">
+                    <a href="{{ url_for('analytics') }}" class="btn btn-outline-success w-100">
+                        <i class="fas fa-chart-line"></i> Analytics
+                    </a>
+                </div>
+                <div class="col-6 mb-2">
+                    <button class="btn btn-outline-info w-100" onclick="showNotifications()">
+                        <i class="fas fa-bell"></i> Notificaties
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Floating Action Button -->
+<a href="{{ url_for('add_reading') }}" class="floating-action-btn d-flex align-items-center justify-content-center">
+    <i class="fas fa-plus"></i>
+</a>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showNotifications() {
+    // Check if browser supports notifications
+    if (!("Notification" in window)) {
+        alert("Deze browser ondersteunt geen notificaties");
+        return;
+    }
+    
+    // Request permission
+    Notification.requestPermission().then(function(permission) {
+        if (permission === "granted") {
+            // Show test notification
+            new Notification("Diabetes Tracker", {
+                body: "Tijd voor een bloedwaarde meting!",
+                icon: "/static/icon.png"
+            });
+        }
+    });
+}
+
+// Auto-refresh every 5 minutes
+setInterval(function() {
+    location.reload();
+}, 300000);
+
+// Check for new data every 30 seconds
+setInterval(function() {
+    fetch('/api/get_readings')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.readings.length > 0) {
+                // Update recent readings if needed
+                console.log('Data updated');
+            }
+        });
+}, 30000);
+</script>
+{% endblock %} 

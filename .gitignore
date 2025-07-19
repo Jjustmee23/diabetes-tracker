@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Application specific
+*.db
+*.sqlite
+*.sqlite3
+backups/
+temp_update/
+*.log
+
+# Standalone builds
+Diabetes_Tracker_Standalone/
+Diabetes_Tracker_Auto_Start/
+*.exe
+*.zip
+
+# Release files
+release_v*/
+RELEASE_NOTES_v*.txt
+GITHUB_RELEASE_INSTRUCTIONS_v*.txt
+Diabetes_Tracker_*_v*.zip
+
+# Test files
+test_*.db
+test_*.xlsx
+test_*.pdf
+tesd.xlsx
+pg.pdf
