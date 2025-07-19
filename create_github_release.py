@@ -1,119 +1,136 @@
 #!/usr/bin/env python3
 """
-Script om GitHub releases te maken voor de Diabetes Tracker
-Gebruik: python create_github_release.py [version] [release_notes]
+Script om GitHub release te maken en installer te uploaden
 """
 
 import os
 import sys
-import zipfile
-import shutil
-from datetime import datetime
+import requests
+import json
+from pathlib import Path
 
-def create_release_package(version, release_notes=""):
-    """Maak een release package voor GitHub"""
+def create_github_release(version, zip_file_path):
+    """Maak GitHub release en upload installer"""
     
-    print(f"🎯 Maak release package voor versie {version}")
+    # GitHub API configuratie
+    repo_owner = "Jjustmee23"
+    repo_name = "diabetes-tracker"
+    api_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}"
     
-    # Maak release directory
-    release_dir = f"release_v{version}"
-    if os.path.exists(release_dir):
-        shutil.rmtree(release_dir)
-    os.makedirs(release_dir)
+    # Controleer of zip file bestaat
+    if not os.path.exists(zip_file_path):
+        print(f"❌ ZIP file niet gevonden: {zip_file_path}")
+        return False
     
-    # Kopieer standalone versie
-    standalone_dir = "Diabetes_Tracker_Standalone"
+    print(f"🔍 Zoek naar bestaande release voor v{version}...")
     
-    if os.path.exists(standalone_dir):
-        print(f"📦 Kopieer {standalone_dir}...")
-        shutil.copytree(standalone_dir, os.path.join(release_dir, standalone_dir))
+    # Controleer of release al bestaat
+    releases_url = f"{api_url}/releases"
+    response = requests.get(releases_url)
     
-    # Maak ZIP bestand voor GitHub release
-    print("🗜️ Maak ZIP bestand...")
+    if response.status_code == 200:
+        releases = response.json()
+        for release in releases:
+            if release['tag_name'] == f"v{version}":
+                print(f"⚠️  Release v{version} bestaat al!")
+                return False
     
-    # Standalone versie ZIP
-    standalone_zip = f"Diabetes_Tracker_Standalone_v{version}.zip"
-    if os.path.exists(os.path.join(release_dir, standalone_dir)):
-        with zipfile.ZipFile(standalone_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, dirs, files in os.walk(os.path.join(release_dir, standalone_dir)):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, release_dir)
-                    zipf.write(file_path, arcname)
-        print(f"✅ {standalone_zip} gemaakt")
+    # Maak nieuwe release
+    print(f"📦 Maak nieuwe release v{version}...")
     
-    # Maak release notes bestand
-    release_notes_file = f"RELEASE_NOTES_v{version}.txt"
-    with open(release_notes_file, 'w', encoding='utf-8') as f:
-        f.write(f"Diabetes Tracker v{version}\n")
-        f.write("=" * 50 + "\n\n")
-        f.write(f"Released: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-        
-        if release_notes:
-            f.write("Release Notes:\n")
-            f.write("-" * 20 + "\n")
-            f.write(release_notes)
-            f.write("\n\n")
-        
-        f.write("Installatie Instructies:\n")
-        f.write("-" * 25 + "\n")
-        f.write("1. Download de standalone versie:\n")
-        f.write(f"   - Diabetes_Tracker_Standalone_v{version}.zip\n\n")
-        f.write("2. Extract het ZIP bestand\n")
-        f.write("3. Start de applicatie:\n")
-        f.write("   - Dubbelklik op START_DIABETES_TRACKER.bat\n")
-        f.write("   - Of dubbelklik op Diabetes_Tracker.exe (als aanwezig)\n\n")
-        f.write("Database behoud:\n")
-        f.write("- De database wordt automatisch behouden tijdens updates\n")
-        f.write("- Backup bestanden worden gemaakt in de backups/ map\n\n")
-        f.write("Ondersteuning:\n")
-        f.write("- Voor vragen of problemen, neem contact op met de ontwikkelaar\n")
+    release_data = {
+        "tag_name": f"v{version}",
+        "name": f"Diabetes Tracker v{version}",
+        "body": f"""## 🆕 Nieuwe Features
+- Verbeterde modals en popups (groter en gecentreerd)
+- Betere date/time pickers
+- Auto-update systeem via GitHub Releases
+- Standalone .exe versie
+
+## 📦 Installatie
+1. Download `Diabetes_Tracker_Installer_v{version}.zip`
+2. Extract het bestand
+3. Dubbelklik op `START_DIABETES_TRACKER.bat`
+4. Klaar! Geen Python nodig
+
+## 🔄 Auto-Update
+De app controleert automatisch op updates via GitHub Releases.
+
+## 📋 Changelog
+- Verbeterde UI/UX
+- Grotere en gecentreerde modals
+- Betere date/time pickers
+- Auto-update functionaliteit
+- Standalone .exe distributie""",
+        "draft": False,
+        "prerelease": False
+    }
     
-    print(f"✅ {release_notes_file} gemaakt")
+    # Maak release (zonder assets eerst)
+    response = requests.post(
+        f"{api_url}/releases",
+        headers={"Accept": "application/vnd.github.v3+json"},
+        data=json.dumps(release_data)
+    )
     
-    # Maak GitHub release instructies
-    github_instructions = f"GITHUB_RELEASE_INSTRUCTIONS_v{version}.txt"
-    with open(github_instructions, 'w', encoding='utf-8') as f:
-        f.write("GitHub Release Instructies\n")
-        f.write("=" * 30 + "\n\n")
-        f.write(f"1. Ga naar je GitHub repository\n")
-        f.write("2. Klik op 'Releases' in de rechterkolom\n")
-        f.write("3. Klik op 'Create a new release'\n")
-        f.write(f"4. Tag: v{version}\n")
-        f.write(f"5. Title: Diabetes Tracker v{version}\n")
-        f.write("6. Beschrijving:\n")
-        f.write("   Kopieer de inhoud van RELEASE_NOTES_v{version}.txt\n\n")
-        f.write("7. Upload bestanden:\n")
-        if os.path.exists(standalone_zip):
-            f.write(f"   - {standalone_zip}\n")
-        f.write("\n8. Klik 'Publish release'\n\n")
-        f.write("Update Systeem:\n")
-        f.write("- Patienten krijgen automatisch een melding van nieuwe updates\n")
-        f.write("- Updates worden gedownload en geïnstalleerd met behoud van data\n")
+    if response.status_code != 201:
+        print(f"❌ Fout bij maken release: {response.status_code}")
+        print(response.text)
+        return False
     
-    print(f"✅ {github_instructions} gemaakt")
+    release_info = response.json()
+    print(f"✅ Release gemaakt: {release_info['html_url']}")
     
-    # Cleanup release directory
-    shutil.rmtree(release_dir)
+    # Upload asset
+    print(f"📤 Upload {os.path.basename(zip_file_path)}...")
     
-    print(f"\n🎉 Release package voor v{version} succesvol gemaakt!")
-    print(f"📁 Bestanden gemaakt:")
-    if os.path.exists(standalone_zip):
-        print(f"   - {standalone_zip}")
-    print(f"   - {release_notes_file}")
-    print(f"   - {github_instructions}")
-    print(f"\n📋 Volg de instructies in {github_instructions} om de release te publiceren")
+    upload_url = release_info['upload_url'].replace('{?name,label}', f'?name={os.path.basename(zip_file_path)}')
+    
+    with open(zip_file_path, 'rb') as f:
+        response = requests.post(
+            upload_url,
+            headers={
+                "Accept": "application/vnd.github.v3+json",
+                "Content-Type": "application/zip"
+            },
+            data=f
+        )
+    
+    if response.status_code == 201:
+        print(f"✅ Asset geüpload: {response.json()['browser_download_url']}")
+        print(f"🎉 Release succesvol gemaakt!")
+        print(f"🔗 Download URL: {release_info['html_url']}")
+        return True
+    else:
+        print(f"❌ Fout bij uploaden asset: {response.status_code}")
+        print(response.text)
+        return False
 
 def main():
-    if len(sys.argv) < 2:
-        print("Gebruik: python create_github_release.py [version] [release_notes]")
-        print("Voorbeeld: python create_github_release.py 1.2.0 'Nieuwe features en bug fixes'")
+    if len(sys.argv) != 2:
+        print("Gebruik: python create_github_release.py <version>")
+        print("Voorbeeld: python create_github_release.py 1.2.1")
         return
     
     version = sys.argv[1]
-    release_notes = sys.argv[2] if len(sys.argv) > 2 else ""
+    zip_file = f"Diabetes_Tracker_Installer_v{version}.zip"
     
-    create_release_package(version, release_notes)
+    if not os.path.exists(zip_file):
+        print(f"❌ ZIP file niet gevonden: {zip_file}")
+        print("Maak eerst de installer met: python create_installer.py {version}")
+        return
+    
+    print(f"🚀 Maak GitHub release voor versie {version}...")
+    success = create_github_release(version, zip_file)
+    
+    if success:
+        print("\n🎯 Volgende stappen:")
+        print("1. Test de download van de release")
+        print("2. Distributeer de release URL naar patiënten")
+        print("3. De app zal automatisch updaten via GitHub Releases")
+    else:
+        print("\n❌ Release maken mislukt")
+        print("Controleer je internetverbinding en GitHub toegang")
 
 if __name__ == "__main__":
     main() 

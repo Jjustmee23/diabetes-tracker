@@ -26,8 +26,10 @@ warnings.filterwarnings('ignore')
 try:
     from update_system import UpdateSystem
     UPDATE_SYSTEM_AVAILABLE = True
-except ImportError:
+    print("✅ Update systeem geladen")
+except ImportError as e:
     UPDATE_SYSTEM_AVAILABLE = False
+    print(f"❌ Update systeem niet beschikbaar: {e}")
 
 class NotificationManager:
     """Beheer notificaties en herinneringen"""
@@ -275,7 +277,7 @@ class AIAnalytics:
 class DiabetesTracker:
     def __init__(self, root):
         self.root = root
-        self.root.title("Diabetes Bloedwaarden Tracker - Complete Dashboard")
+        self.root.title("Diabetes Bloedwaarden Tracker v1.2.5 - Complete Dashboard")
         self.root.geometry("1800x1200")
         self.root.state('zoomed')  # Start maximized
         
@@ -320,8 +322,7 @@ class DiabetesTracker:
             "Fitness", "Hardlopen", "Yoga", "Andere"
         ]
         
-        self.insulin_advice = tk.StringVar()
-        self.insulin_advice.set("")
+        # Insuline advies verwijderd
         
         # Medicatie multiselect variabelen
         self.selected_medications = []
@@ -372,6 +373,10 @@ class DiabetesTracker:
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="Gebruikershandleiding", command=self.show_help)
+        help_menu.add_separator()
+        if UPDATE_SYSTEM_AVAILABLE:
+            help_menu.add_command(label="🔄 Check voor Updates", command=self.manual_update_check)
+        help_menu.add_separator()
         help_menu.add_command(label="Over", command=self.show_about)
         
         # Update menu (alleen als update systeem beschikbaar is)
@@ -454,7 +459,7 @@ class DiabetesTracker:
             if filename:
                 df = pd.DataFrame(data, columns=[
                     'Datum', 'Tijd', 'Bloedwaarde (mg/dL)', 'Medicatie', 
-                    'Activiteit', 'Gewicht (kg)', 'Opmerkingen', 'Insuline Advies', 'Insuline ingenomen', 'Insuline vergeten'
+                    'Activiteit', 'Gewicht (kg)', 'Opmerkingen', 'Medicatie Hoeveelheid', 'Insuline ingenomen', 'Insuline vergeten'
                 ])
                 
                 with pd.ExcelWriter(filename, engine='openpyxl') as writer:
@@ -781,9 +786,9 @@ class DiabetesTracker:
                 activiteit TEXT,
                 gewicht REAL,
                 opmerkingen TEXT,
-                insuline_advies TEXT,
                 insuline_ingenomen INTEGER,
-                insuline_vergeten INTEGER
+                insuline_vergeten INTEGER,
+                medicatie_hoeveelheid TEXT
             )
         ''')
         
@@ -795,23 +800,105 @@ class DiabetesTracker:
         except sqlite3.Error:
             pass  # Indexes bestaan mogelijk al
         
-        # Probeer kolommen toe te voegen indien nodig
-        try:
-            self.cursor.execute('ALTER TABLE bloedwaarden ADD COLUMN insuline_advies TEXT')
-        except:
-            pass
-        try:
-            self.cursor.execute('ALTER TABLE bloedwaarden ADD COLUMN insuline_ingenomen INTEGER')
-        except:
-            pass
-        try:
-            self.cursor.execute('ALTER TABLE bloedwaarden ADD COLUMN insuline_vergeten INTEGER')
-        except:
-            pass
+        # Veilige database migratie - voeg kolommen toe zonder data verlies
+        self.safe_add_column('insuline_ingenomen', 'INTEGER')
+        self.safe_add_column('insuline_vergeten', 'INTEGER')
+        self.safe_add_column('medicatie_hoeveelheid', 'TEXT')
         
         # Optimaliseer database
         self.cursor.execute('PRAGMA optimize')
         self.conn.commit()
+    
+    def safe_add_column(self, column_name, column_type):
+        """Veilig een kolom toevoegen aan de database zonder data verlies"""
+        try:
+            # Controleer eerst of de kolom al bestaat
+            self.cursor.execute("PRAGMA table_info(bloedwaarden)")
+            columns = [column[1] for column in self.cursor.fetchall()]
+            
+            if column_name not in columns:
+                # Maak automatische backup voordat migratie
+                self.create_migration_backup()
+                
+                # Maak backup van huidige data
+                self.cursor.execute("SELECT * FROM bloedwaarden")
+                old_data = self.cursor.fetchall()
+                
+                # Voeg kolom toe
+                self.cursor.execute(f"ALTER TABLE bloedwaarden ADD COLUMN {column_name} {column_type}")
+                
+                # Herstel data met nieuwe kolom (NULL waarden voor nieuwe kolom)
+                if old_data:
+                    # Maak nieuwe tabel met gewenste structuur
+                    self.cursor.execute("""
+                        CREATE TABLE bloedwaarden_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            datum TEXT NOT NULL,
+                            tijd TEXT NOT NULL,
+                            bloedwaarde REAL NOT NULL,
+                            medicatie TEXT,
+                            activiteit TEXT,
+                            gewicht REAL,
+                            opmerkingen TEXT,
+                            insuline_ingenomen INTEGER,
+                            insuline_vergeten INTEGER,
+                            medicatie_hoeveelheid TEXT
+                        )
+                    """)
+                    
+                    # Kopieer data naar nieuwe tabel
+                    for row in old_data:
+                        # Pas de row aan voor nieuwe structuur
+                        if len(row) == 9:  # Oude structuur zonder medicatie_hoeveelheid
+                            new_row = row + (None,)  # Voeg NULL toe voor medicatie_hoeveelheid
+                        elif len(row) == 8:  # Nog oudere structuur
+                            new_row = row + (None, None)  # Voeg NULL toe voor beide nieuwe kolommen
+                        else:
+                            new_row = row
+                        
+                        self.cursor.execute("""
+                            INSERT INTO bloedwaarden_new 
+                            (datum, tijd, bloedwaarde, medicatie, activiteit, gewicht, opmerkingen, 
+                             insuline_ingenomen, insuline_vergeten, medicatie_hoeveelheid)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, new_row)
+                    
+                    # Vervang oude tabel
+                    self.cursor.execute("DROP TABLE bloedwaarden")
+                    self.cursor.execute("ALTER TABLE bloedwaarden_new RENAME TO bloedwaarden")
+                
+                self.conn.commit()
+                print(f"✅ Kolom '{column_name}' succesvol toegevoegd")
+            else:
+                print(f"ℹ️ Kolom '{column_name}' bestaat al")
+                
+        except Exception as e:
+            print(f"⚠️ Fout bij toevoegen kolom '{column_name}': {e}")
+            # Probeer gewone ALTER TABLE als fallback
+            try:
+                self.cursor.execute(f"ALTER TABLE bloedwaarden ADD COLUMN {column_name} {column_type}")
+                self.conn.commit()
+                print(f"✅ Kolom '{column_name}' toegevoegd via fallback")
+            except:
+                print(f"❌ Kon kolom '{column_name}' niet toevoegen")
+    
+    def create_migration_backup(self):
+        """Maak automatische backup voordat database migratie"""
+        try:
+            import shutil
+            from datetime import datetime
+            
+            # Maak backup bestandsnaam met timestamp
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            backup_filename = f"migration_backup_{timestamp}.db"
+            
+            # Kopieer huidige database
+            shutil.copy2('diabetes_data.db', backup_filename)
+            
+            print(f"🔄 Automatische backup gemaakt: {backup_filename}")
+            
+        except Exception as e:
+            print(f"⚠️ Kon geen automatische backup maken: {e}")
     
     def optimize_database(self):
         """Database optimaliseren voor betere performance"""
@@ -929,7 +1016,7 @@ class DiabetesTracker:
         datetime_frame.pack(fill=tk.X, pady=(0, 20))
         
         ttk.Label(datetime_frame, text="📅 Datum:", font=('Arial', 12)).pack(side=tk.LEFT)
-        self.date_entry = ttk.Entry(datetime_frame, width=15, font=('Arial', 12))
+        self.date_entry = ttk.Entry(datetime_frame, width=20, font=('Arial', 12))
         self.date_entry.pack(side=tk.LEFT, padx=(10, 10))
         self.date_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
         self.create_tooltip(self.date_entry, "Voer datum in (YYYY-MM-DD)")
@@ -941,7 +1028,7 @@ class DiabetesTracker:
         self.create_tooltip(date_picker_button, "Kies datum uit kalender")
         
         ttk.Label(datetime_frame, text="🕐 Tijd:", font=('Arial', 12)).pack(side=tk.LEFT)
-        self.time_entry = ttk.Entry(datetime_frame, width=10, font=('Arial', 12))
+        self.time_entry = ttk.Entry(datetime_frame, width=15, font=('Arial', 12))
         self.time_entry.pack(side=tk.LEFT, padx=(10, 10))
         self.time_entry.insert(0, datetime.now().strftime("%H:%M"))
         self.create_tooltip(self.time_entry, "Voer tijd in (HH:MM)")
@@ -962,10 +1049,7 @@ class DiabetesTracker:
         self.blood_entry.bind('<KeyRelease>', lambda e: self.on_blood_entry_change())
         self.create_tooltip(self.blood_entry, "Voer bloedglucose waarde in (0-1000 mg/dL)")
         
-        # Insuline advies label
-        self.insulin_advice_label = ttk.Label(blood_frame, textvariable=self.insulin_advice, 
-                                             foreground='blue', font=('Arial', 12, 'bold'))
-        self.insulin_advice_label.pack(side=tk.LEFT, padx=(10, 0))
+        # Insuline advies label verwijderd
         
         # Medicatie multiselect sectie
         medication_frame = ttk.Frame(input_card)
@@ -1090,7 +1174,7 @@ class DiabetesTracker:
         history_card.rowconfigure(0, weight=1)
         
         # Treeview voor data met grotere font
-        columns = ('Datum', 'Tijd', 'Bloedwaarde', 'Medicatie', 'Activiteit', 'Gewicht', 'Opmerkingen', 'Insuline Advies', 'Insuline ingenomen', 'Insuline vergeten')
+        columns = ('Datum', 'Tijd', 'Bloedwaarde', 'Medicatie', 'Activiteit', 'Gewicht', 'Opmerkingen', 'Medicatie Hoeveelheid', 'Insuline ingenomen', 'Insuline vergeten')
         self.tree = ttk.Treeview(history_card, columns=columns, show='headings', height=12)
         
         # Kolom headers
@@ -1141,38 +1225,9 @@ class DiabetesTracker:
             # Als patiënten database niet bestaat, gebruik standaard medicatie
             return self.medications
             
-    def calculate_insulin_advice(self, value):
-        """
-        Bepaal insuline advies op basis van bloedwaarde.
-        Aangepaste verhoudingen voor verschillende medicatie types.
-        """
-        try:
-            value = float(value)
-            
-            # Controleer eerst of patiënt insuline gebruikt
-            patient_medications = self.get_patient_medications()
-            uses_insulin = any('insuline' in med.lower() for med in patient_medications)
-            
-            if not uses_insulin:
-                return "Geen insuline voorgeschreven"
-            
-            # Verschillende adviezen op basis van bloedwaarde
-            if value < 80:
-                return "0 eenheden (laag risico)"
-            elif 80 <= value <= 120:
-                return "2-3 eenheden"
-            elif 121 <= value <= 180:
-                return "4-6 eenheden"
-            elif 181 <= value <= 250:
-                return "6-8 eenheden"
-            else:
-                return "8+ eenheden (overleg arts)"
-        except Exception:
-            return "-"
-
     def on_blood_entry_change(self, *args):
-        advies = self.calculate_insulin_advice(self.blood_entry.get())
-        self.insulin_advice.set(f"Advies: {advies}")
+        # Lege functie - insuline advies verwijderd
+        pass
 
     def on_medication_select(self, event):
         """Toon pro/con info bij medicatie selectie"""
@@ -1362,6 +1417,16 @@ class DiabetesTracker:
             
             # Haal andere waarden op
             medicatie = ", ".join(self.selected_medications) if self.selected_medications else ""
+            
+            # Verzamel medicatie hoeveelheden
+            medicatie_hoeveelheden = []
+            for med in self.selected_medications:
+                if med in self.medication_details:
+                    amount = self.medication_details[med]['amount'].get().strip()
+                    if amount:
+                        medicatie_hoeveelheden.append(f"{med}: {amount}")
+            
+            medicatie_hoeveelheid = "; ".join(medicatie_hoeveelheden) if medicatie_hoeveelheden else ""
             activiteit = self.activity_var.get()
             
             # Als "Andere" is geselecteerd, gebruik de custom activiteit
@@ -1376,9 +1441,9 @@ class DiabetesTracker:
             
             # Voeg toe aan database
             self.cursor.execute('''
-                INSERT INTO bloedwaarden (datum, tijd, bloedwaarde, medicatie, activiteit, gewicht, opmerkingen, insuline_advies)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (datum, tijd, bloedwaarde, medicatie, activiteit, gewicht, opmerkingen, self.insulin_advice.get()))
+                            INSERT INTO bloedwaarden (datum, tijd, bloedwaarde, medicatie, activiteit, gewicht, opmerkingen, medicatie_hoeveelheid)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (datum, tijd, bloedwaarde, medicatie, activiteit, gewicht, opmerkingen, medicatie_hoeveelheid))
             
             self.conn.commit()
             
@@ -1418,7 +1483,7 @@ class DiabetesTracker:
             self.activity_other_frame.pack_forget()  # Verberg extra activiteit veld
             self.weight_entry.delete(0, tk.END)
             self.notes_entry.delete(0, tk.END)
-            self.insulin_advice.set("")
+            # Insuline advies verwijderd
             
             # Verwijder alle geselecteerde medicatie
             for med in self.selected_medications:
@@ -1451,7 +1516,7 @@ class DiabetesTracker:
             
             # Eerst alleen de laatste 100 records laden voor snelle weergave
             self.cursor.execute('''
-                SELECT datum, tijd, bloedwaarde, medicatie, activiteit, gewicht, opmerkingen, insuline_advies, insuline_ingenomen, insuline_vergeten
+                SELECT datum, tijd, bloedwaarde, medicatie, activiteit, gewicht, opmerkingen, medicatie_hoeveelheid, insuline_ingenomen, insuline_vergeten
                 FROM bloedwaarden
                 ORDER BY datum DESC, tijd DESC
                 LIMIT 100
@@ -1461,12 +1526,13 @@ class DiabetesTracker:
             for row in self.cursor.fetchall():
                 # Gewicht formatting
                 gewicht = f"{row[5]:.1f}" if row[5] else ""
+                medicatie_hoeveelheid = row[7] or ""
                 ingenomen = "Ja" if row[8] else "Nee"
                 vergeten = "Ja" if row[9] else "Nee"
                 
                 # Voeg rij toe met tags voor styling
                 item = self.tree.insert('', 'end', values=(
-                    row[0], row[1], f"{row[2]:.1f}", row[3], row[4], gewicht, row[6], row[7], ingenomen, vergeten
+                    row[0], row[1], f"{row[2]:.1f}", row[3], row[4], gewicht, row[6], medicatie_hoeveelheid, ingenomen, vergeten
                 ))
                 
                 # Kleur rij op basis van bloedwaarde
@@ -1484,7 +1550,7 @@ class DiabetesTracker:
         """Laad alle data (voor export en statistieken)"""
         try:
             self.cursor.execute('''
-                SELECT datum, tijd, bloedwaarde, medicatie, activiteit, gewicht, opmerkingen, insuline_advies, insuline_ingenomen, insuline_vergeten
+                SELECT datum, tijd, bloedwaarde, medicatie, activiteit, gewicht, opmerkingen, medicatie_hoeveelheid, insuline_ingenomen, insuline_vergeten
                 FROM bloedwaarden
                 ORDER BY datum DESC, tijd DESC
             ''')
@@ -1565,7 +1631,7 @@ class DiabetesTracker:
             
             # Gebruik geoptimaliseerde query met index hints
             self.cursor.execute('''
-                SELECT datum, tijd, bloedwaarde, medicatie, activiteit, gewicht, opmerkingen, insuline_advies, insuline_ingenomen, insuline_vergeten
+                SELECT datum, tijd, bloedwaarde, medicatie, activiteit, gewicht, opmerkingen, medicatie_hoeveelheid, insuline_ingenomen, insuline_vergeten
                 FROM bloedwaarden
                 WHERE datum BETWEEN ? AND ?
                 ORDER BY datum DESC, tijd DESC
@@ -1611,7 +1677,7 @@ class DiabetesTracker:
                     
                     df = pd.DataFrame(all_data, columns=[
                         'Datum', 'Tijd', 'Bloedwaarde (mg/dL)', 'Medicatie', 
-                        'Activiteit', 'Gewicht (kg)', 'Opmerkingen', 'Insuline Advies', 'Insuline ingenomen', 'Insuline vergeten'
+                        'Activiteit', 'Gewicht (kg)', 'Opmerkingen', 'Medicatie Hoeveelheid', 'Insuline ingenomen', 'Insuline vergeten'
                     ])
                     
                     df.to_excel(writer, sheet_name='Bloedwaarden', index=False)
@@ -1675,14 +1741,15 @@ class DiabetesTracker:
                 max_rows = 1000
                 data_to_show = data[:max_rows]
                 
-                table_data = [['Datum', 'Tijd', 'Bloedwaarde', 'Medicatie', 'Activiteit', 'Gewicht', 'Opmerkingen', 'Insuline Advies', 'Insuline ingenomen', 'Insuline vergeten']]
+                table_data = [['Datum', 'Tijd', 'Bloedwaarde', 'Medicatie', 'Activiteit', 'Gewicht', 'Opmerkingen', 'Medicatie Hoeveelheid', 'Insuline ingenomen', 'Insuline vergeten']]
                 
                 for row in data_to_show:
                     gewicht = f"{row[5]:.1f}" if row[5] else ""
+                    medicatie_hoeveelheid = row[7] or ""
                     ingenomen = "Ja" if row[8] else "Nee"
                     vergeten = "Ja" if row[9] else "Nee"
                     table_data.append([
-                        row[0], row[1], f"{row[2]:.1f}", row[3], row[4], gewicht, row[6] or "", row[7] or "", ingenomen, vergeten
+                        row[0], row[1], f"{row[2]:.1f}", row[3], row[4], gewicht, row[6] or "", medicatie_hoeveelheid, ingenomen, vergeten
                     ])
                 
                 if len(data) > max_rows:
@@ -1704,7 +1771,7 @@ class DiabetesTracker:
                 story.append(Spacer(1, 12))
                 
                 # Statistieken
-                df = pd.DataFrame(data, columns=['Datum', 'Tijd', 'Bloedwaarde', 'Medicatie', 'Activiteit', 'Gewicht', 'Opmerkingen', 'Insuline Advies', 'Insuline ingenomen', 'Insuline vergeten'])
+                df = pd.DataFrame(data, columns=['Datum', 'Tijd', 'Bloedwaarde', 'Medicatie', 'Activiteit', 'Gewicht', 'Opmerkingen', 'Medicatie Hoeveelheid', 'Insuline ingenomen', 'Insuline vergeten'])
                 
                 stats_text = f"""
                 Statistieken:
@@ -2275,15 +2342,29 @@ class DiabetesTracker:
     # Update systeem functies
     def check_for_updates_on_startup(self):
         """Controleer voor updates bij startup"""
-        # Update systeem is uitgeschakeld - geen server gekoppeld
-        # In een echte implementatie zou hier een update check staan
-        pass
+        if UPDATE_SYSTEM_AVAILABLE:
+            # Start update check in aparte thread om UI niet te blokkeren
+            def startup_check():
+                try:
+                    update_info = self.update_system.check_for_updates(show_result=False)
+                    if update_info:
+                        # Toon update melding in hoofdthread
+                        self.root.after(0, lambda: self.update_system.show_update_available(update_info))
+                except Exception as e:
+                    print(f"Startup update check fout: {e}")
+            
+            import threading
+            update_thread = threading.Thread(target=startup_check)
+            update_thread.daemon = True
+            update_thread.start()
     
     def manual_update_check(self):
         """Handmatige update check"""
-        # Update systeem is uitgeschakeld - geen server gekoppeld
-        messagebox.showinfo("Updates", "Update systeem is momenteel niet beschikbaar.\n\nIn een echte implementatie zou hier een update server gekoppeld zijn.")
-        self.update_status("Update systeem uitgeschakeld")
+        if UPDATE_SYSTEM_AVAILABLE:
+            self.update_system.check_for_updates(show_result=True)
+        else:
+            messagebox.showinfo("Updates", "Update systeem is momenteel niet beschikbaar.\n\nIn een echte implementatie zou hier een update server gekoppeld zijn.")
+            self.update_status("Update systeem uitgeschakeld")
     
     def show_update_settings(self):
         """Toon update instellingen"""
@@ -2423,43 +2504,63 @@ class DiabetesTracker:
         """Toon date picker popup"""
         date_window = tk.Toplevel(self.root)
         date_window.title("📅 Kies Datum")
-        date_window.geometry("800x600")
+        date_window.resizable(False, False)  # Niet resizable
         date_window.transient(self.root)
         date_window.grab_set()
         
-        # Centreren
-        date_window.geometry("+%d+%d" % (
-            self.root.winfo_rootx() + 100,
-            self.root.winfo_rooty() + 100
-        ))
+        # Bereken optimale grootte en positie
+        window_width = 400
+        window_height = 300
         
-        # Date frame
-        date_frame = ttk.Frame(date_window, padding="20")
-        date_frame.pack(fill=tk.BOTH, expand=True)
+        # Haal scherm grootte op
+        screen_width = date_window.winfo_screenwidth()
+        screen_height = date_window.winfo_screenheight()
         
-        ttk.Label(date_frame, text="📅 Kies datum:", font=('Arial', 14)).pack(pady=(0, 20))
+        # Bereken positie voor centrering
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
         
-        # Datum input
-        date_input_frame = ttk.Frame(date_frame)
-        date_input_frame.pack(pady=10)
+        date_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
         
-        ttk.Label(date_input_frame, text="Dag:").pack(side=tk.LEFT)
-        day_var = tk.StringVar(value=datetime.now().day)
-        day_spinbox = ttk.Spinbox(date_input_frame, from_=1, to=31, width=5, 
-                                 textvariable=day_var, wrap=True)
-        day_spinbox.pack(side=tk.LEFT, padx=(5, 20))
+        # Main frame met padding
+        main_frame = ttk.Frame(date_window, padding="30")
+        main_frame.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(date_input_frame, text="Maand:").pack(side=tk.LEFT)
-        month_var = tk.StringVar(value=datetime.now().month)
-        month_spinbox = ttk.Spinbox(date_input_frame, from_=1, to=12, width=5, 
-                                   textvariable=month_var, wrap=True)
-        month_spinbox.pack(side=tk.LEFT, padx=(5, 20))
+        # Titel
+        title_label = ttk.Label(main_frame, text="📅 Kies Datum", 
+                               font=('Arial', 16, 'bold'))
+        title_label.pack(pady=(0, 25))
         
-        ttk.Label(date_input_frame, text="Jaar:").pack(side=tk.LEFT)
-        year_var = tk.StringVar(value=datetime.now().year)
-        year_spinbox = ttk.Spinbox(date_input_frame, from_=2020, to=2030, width=7, 
-                                  textvariable=year_var, wrap=True)
-        year_spinbox.pack(side=tk.LEFT, padx=5)
+        # Datum input frame
+        date_input_frame = ttk.LabelFrame(main_frame, text="Datum Invoer", padding="20")
+        date_input_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        # Dag input
+        day_frame = ttk.Frame(date_input_frame)
+        day_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(day_frame, text="Dag:", font=('Arial', 12)).pack(side=tk.LEFT)
+        day_var = tk.StringVar(value=str(datetime.now().day))
+        day_spinbox = ttk.Spinbox(day_frame, from_=1, to=31, width=12, 
+                                 textvariable=day_var, wrap=True, font=('Arial', 12))
+        day_spinbox.pack(side=tk.RIGHT, padx=(10, 0))
+        
+        # Maand input
+        month_frame = ttk.Frame(date_input_frame)
+        month_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(month_frame, text="Maand:", font=('Arial', 12)).pack(side=tk.LEFT)
+        month_var = tk.StringVar(value=str(datetime.now().month))
+        month_spinbox = ttk.Spinbox(month_frame, from_=1, to=12, width=12, 
+                                   textvariable=month_var, wrap=True, font=('Arial', 12))
+        month_spinbox.pack(side=tk.RIGHT, padx=(10, 0))
+        
+        # Jaar input
+        year_frame = ttk.Frame(date_input_frame)
+        year_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(year_frame, text="Jaar:", font=('Arial', 12)).pack(side=tk.LEFT)
+        year_var = tk.StringVar(value=str(datetime.now().year))
+        year_spinbox = ttk.Spinbox(year_frame, from_=2020, to=2030, width=15, 
+                                  textvariable=year_var, wrap=True, font=('Arial', 12))
+        year_spinbox.pack(side=tk.RIGHT, padx=(10, 0))
         
         def set_date():
             try:
@@ -2476,55 +2577,110 @@ class DiabetesTracker:
             except ValueError:
                 messagebox.showerror("Fout", "Ongeldige datum ingevoerd")
         
-        # Knoppen
-        button_frame = ttk.Frame(date_frame)
-        button_frame.pack(pady=20)
+        # Knoppen frame
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(20, 0))
         
-        ttk.Button(button_frame, text="✅ Bevestig", command=set_date, 
-                  style='success.TButton').pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="❌ Annuleer", command=date_window.destroy, 
-                  style='secondary.TButton').pack(side=tk.LEFT, padx=5)
+        # Knoppen met gelijke grootte
+        confirm_btn = ttk.Button(button_frame, text="✅ Bevestig", command=set_date, 
+                                style='success.TButton', width=15)
+        confirm_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        cancel_btn = ttk.Button(button_frame, text="❌ Annuleer", command=date_window.destroy, 
+                               style='secondary.TButton', width=15)
+        cancel_btn.pack(side=tk.RIGHT, padx=(10, 0))
+        
+        # Focus op eerste spinbox
+        day_spinbox.focus_set()
+        
+        # Enter key binding
+        date_window.bind('<Return>', lambda e: set_date())
+        date_window.bind('<Escape>', lambda e: date_window.destroy())
     
     def show_time_picker(self):
         """Toon time picker popup"""
         time_window = tk.Toplevel(self.root)
         time_window.title("🕐 Kies Tijd")
-        time_window.geometry("800x600")
+        time_window.resizable(False, False)  # Niet resizable
         time_window.transient(self.root)
         time_window.grab_set()
         
-        # Centreren
-        time_window.geometry("+%d+%d" % (
-            self.root.winfo_rootx() + 100,
-            self.root.winfo_rooty() + 100
-        ))
+        # Bereken optimale grootte en positie
+        window_width = 400
+        window_height = 300
         
-        # Time frame
-        time_frame = ttk.Frame(time_window, padding="20")
-        time_frame.pack(fill=tk.BOTH, expand=True)
+        # Haal scherm grootte op
+        screen_width = time_window.winfo_screenwidth()
+        screen_height = time_window.winfo_screenheight()
         
-        ttk.Label(time_frame, text="🕐 Kies tijd:", font=('Arial', 14)).pack(pady=(0, 20))
+        # Bereken positie voor centrering
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
         
-        # Uren en minuten
-        time_input_frame = ttk.Frame(time_frame)
-        time_input_frame.pack(pady=10)
+        time_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
         
-        ttk.Label(time_input_frame, text="Uren:").pack(side=tk.LEFT)
-        hour_var = tk.StringVar(value=datetime.now().hour)
-        hour_spinbox = ttk.Spinbox(time_input_frame, from_=0, to=23, width=5, 
-                                  textvariable=hour_var, wrap=True)
-        hour_spinbox.pack(side=tk.LEFT, padx=(5, 20))
+        # Main frame met padding
+        main_frame = ttk.Frame(time_window, padding="30")
+        main_frame.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(time_input_frame, text="Minuten:").pack(side=tk.LEFT)
-        minute_var = tk.StringVar(value=datetime.now().minute)
-        minute_spinbox = ttk.Spinbox(time_input_frame, from_=0, to=59, width=5, 
-                                    textvariable=minute_var, wrap=True)
-        minute_spinbox.pack(side=tk.LEFT, padx=5)
+        # Titel
+        title_label = ttk.Label(main_frame, text="🕐 Kies Tijd", 
+                               font=('Arial', 16, 'bold'))
+        title_label.pack(pady=(0, 25))
+        
+        # Tijd input frame
+        time_input_frame = ttk.LabelFrame(main_frame, text="Tijd Invoer", padding="20")
+        time_input_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        # Uren input
+        hour_frame = ttk.Frame(time_input_frame)
+        hour_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(hour_frame, text="Uren:", font=('Arial', 12)).pack(side=tk.LEFT)
+        hour_var = tk.StringVar(value=str(datetime.now().hour))
+        hour_spinbox = ttk.Spinbox(hour_frame, from_=0, to=23, width=12, 
+                                  textvariable=hour_var, wrap=True, font=('Arial', 12))
+        hour_spinbox.pack(side=tk.RIGHT, padx=(10, 0))
+        
+        # Minuten input
+        minute_frame = ttk.Frame(time_input_frame)
+        minute_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(minute_frame, text="Minuten:", font=('Arial', 12)).pack(side=tk.LEFT)
+        minute_var = tk.StringVar(value=str(datetime.now().minute))
+        minute_spinbox = ttk.Spinbox(minute_frame, from_=0, to=59, width=12, 
+                                    textvariable=minute_var, wrap=True, font=('Arial', 12))
+        minute_spinbox.pack(side=tk.RIGHT, padx=(10, 0))
+        
+        # Snelle tijd knoppen
+        quick_time_frame = ttk.LabelFrame(main_frame, text="Snelle Selectie", padding="15")
+        quick_time_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        quick_times = [
+            ("🌅 Ochtend", "08:00"),
+            ("☀️ Middag", "12:00"),
+            ("🌆 Avond", "18:00"),
+            ("🌙 Nacht", "22:00")
+        ]
+        
+        for i, (label, time_str) in enumerate(quick_times):
+            btn = ttk.Button(quick_time_frame, text=label, 
+                           command=lambda t=time_str: quick_set_time(t),
+                           width=12)
+            btn.grid(row=i//2, column=i%2, padx=5, pady=2, sticky="ew")
+        
+        def quick_set_time(time_str):
+            hour, minute = map(int, time_str.split(':'))
+            hour_var.set(str(hour))
+            minute_var.set(str(minute))
         
         def set_time():
             try:
                 hour = int(hour_var.get())
                 minute = int(minute_var.get())
+                
+                # Valideer tijd
+                if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+                    raise ValueError("Ongeldige tijd")
+                
                 time_str = f"{hour:02d}:{minute:02d}"
                 self.time_entry.delete(0, tk.END)
                 self.time_entry.insert(0, time_str)
@@ -2532,14 +2688,25 @@ class DiabetesTracker:
             except ValueError:
                 messagebox.showerror("Fout", "Ongeldige tijd ingevoerd")
         
-        # Knoppen
-        button_frame = ttk.Frame(time_frame)
-        button_frame.pack(pady=20)
+        # Knoppen frame
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(20, 0))
         
-        ttk.Button(button_frame, text="✅ Bevestig", command=set_time, 
-                  style='success.TButton').pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="❌ Annuleer", command=time_window.destroy, 
-                  style='secondary.TButton').pack(side=tk.LEFT, padx=5)
+        # Knoppen met gelijke grootte
+        confirm_btn = ttk.Button(button_frame, text="✅ Bevestig", command=set_time, 
+                                style='success.TButton', width=15)
+        confirm_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        cancel_btn = ttk.Button(button_frame, text="❌ Annuleer", command=time_window.destroy, 
+                               style='secondary.TButton', width=15)
+        cancel_btn.pack(side=tk.RIGHT, padx=(10, 0))
+        
+        # Focus op eerste spinbox
+        hour_spinbox.focus_set()
+        
+        # Enter key binding
+        time_window.bind('<Return>', lambda e: set_time())
+        time_window.bind('<Escape>', lambda e: time_window.destroy())
     
     def on_activity_select(self, event=None):
         """Toon/verberg extra activiteit veld bij 'Andere' selectie"""
