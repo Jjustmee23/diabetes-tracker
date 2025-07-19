@@ -16,9 +16,11 @@ Een moderne desktop applicatie voor het bijhouden van diabetes gegevens, ontwikk
 ## 🛠️ Installatie
 
 ### Voor Patiënten (Aanbevolen)
-1. **Download** de laatste release van GitHub
+1. **Download** de laatste release van GitHub Releases
+   - Ga naar: https://github.com/Jjustmee23/diabetes-tracker/releases
+   - Download `Diabetes_Tracker_Installer_v[version].zip`
 2. **Extract** het ZIP bestand
-3. **Dubbelklik** op `Diabetes_Tracker.exe`
+3. **Dubbelklik** op `START_DIABETES_TRACKER.bat`
 4. **Klaar!** - Geen Python of andere software nodig
 
 ### Voor Ontwikkelaars

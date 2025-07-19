@@ -105,8 +105,15 @@ def create_standalone_package(version):
     with open(start_script, 'w') as f:
         f.write("@echo off\n")
         f.write("echo Starting Diabetes Tracker...\n")
-        f.write("Diabetes_Tracker.exe\n")
-        f.write("pause\n")
+        f.write("cd /d \"%~dp0\"\n")
+        f.write("if exist \"Diabetes_Tracker.exe\" (\n")
+        f.write("    Diabetes_Tracker.exe\n")
+        f.write(") else (\n")
+        f.write("    echo Error: Diabetes_Tracker.exe not found!\n")
+        f.write("    echo Please make sure the file exists in this directory.\n")
+        f.write("    pause\n")
+        f.write("    exit /b 1\n")
+        f.write(")\n")
     print("✅ Start script gemaakt")
     
     # Maak README
