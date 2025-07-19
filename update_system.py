@@ -19,6 +19,23 @@ class UpdateSystem:
         self.github_api_url = f"https://api.github.com/repos/{self.github_repo}/releases"
         
         print(f"✅ UpdateSystem geïnitialiseerd voor versie {self.current_version}")
+        
+        # Controleer of repository bestaat
+        self.check_repository_exists()
+    
+    def check_repository_exists(self):
+        """Controleer of de repository bestaat"""
+        try:
+            response = requests.get(f"https://api.github.com/repos/{self.github_repo}", timeout=5)
+            if response.status_code == 404:
+                print(f"⚠️ Repository {self.github_repo} bestaat niet of is privé")
+                print("ℹ️ Update systeem gebruikt lokale informatie")
+            elif response.status_code == 200:
+                print(f"✅ Repository {self.github_repo} is bereikbaar")
+            else:
+                print(f"⚠️ Repository status: {response.status_code}")
+        except Exception as e:
+            print(f"⚠️ Kan repository niet controleren: {str(e)}")
     
     def check_for_updates(self, show_result=True):
         """Controleer voor updates via GitHub API"""
@@ -33,7 +50,12 @@ class UpdateSystem:
             
             response = requests.get(self.github_api_url, headers=headers, timeout=10)
             
-            if response.status_code != 200:
+            if response.status_code == 404:
+                print(f"❌ Repository {self.github_repo} bestaat niet of is privé")
+                if show_result:
+                    self.show_repository_not_found()
+                return None
+            elif response.status_code != 200:
                 print(f"❌ GitHub API fout: {response.status_code}")
                 if show_result:
                     self.show_connection_error()
@@ -136,6 +158,19 @@ class UpdateSystem:
             "📦 Geen Releases", 
             "Er zijn nog geen releases beschikbaar op GitHub.\n\n"
             f"Repository: {self.github_repo}"
+        )
+    
+    def show_repository_not_found(self):
+        """Toon dat repository niet bestaat"""
+        messagebox.showwarning(
+            "⚠️ Repository Niet Gevonden", 
+            f"De repository {self.github_repo} bestaat niet of is privé.\n\n"
+            "Mogelijke oorzaken:\n"
+            "• Repository naam is incorrect\n"
+            "• Repository is privé en vereist authenticatie\n"
+            "• Repository is verwijderd\n\n"
+            "Updates werken mogelijk niet correct.\n"
+            "Controleer de repository instellingen."
         )
     
     def show_error(self, error_msg):
