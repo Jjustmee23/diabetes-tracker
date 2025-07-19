@@ -64,7 +64,6 @@ pg.pdf
 # Old files
 mobile_*.py
 mobile_*.db
-update_*.py
 update_*.bat
 backup_*.bat
 restore_*.bat
