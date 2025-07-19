@@ -1,35 +1,143 @@
+#!/usr/bin/env python3
+"""
+Diabetes Tracker - Volledige Diabetes Management Applicatie
+Versie 1.2.5
+"""
+
+import os
+import sys
+import sqlite3
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-import sqlite3
-import pandas as pd
 from datetime import datetime, timedelta
-import os
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import pandas as pd
+import subprocess
+import platform
+import threading
+import time
+import numpy as np
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
-import matplotlib.pyplot as plt
 import seaborn as sns
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import numpy as np
-from patient_management import PatientProfile
-import ttkbootstrap as tb
-import threading
-import time
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 import warnings
 warnings.filterwarnings('ignore')
 
-# Import update systeem
+# Import update system
 try:
     from update_system import UpdateSystem
     UPDATE_SYSTEM_AVAILABLE = True
     print("✅ Update systeem geladen")
-except ImportError as e:
+except ImportError:
     UPDATE_SYSTEM_AVAILABLE = False
-    print(f"❌ Update systeem niet beschikbaar: {e}")
+    print("⚠️ Update systeem niet beschikbaar")
+
+class FirewallSetup:
+    """Automatische firewall setup voor de applicatie"""
+    
+    @staticmethod
+    def setup_firewall():
+        """Setup firewall regels voor de applicatie"""
+        try:
+            print("🛡️ Controleer firewall regels...")
+            
+            # Controleer of we op Windows zijn
+            if platform.system() != "Windows":
+                print("ℹ️ Geen Windows systeem, firewall setup overgeslagen")
+                return True
+            
+            # Controleer of firewall regels al bestaan
+            if FirewallSetup.check_firewall_rules():
+                print("✅ Firewall regels bestaan al")
+                return True
+            
+            # Vraag toestemming voor firewall setup
+            result = messagebox.askyesno(
+                "🛡️ Firewall Setup", 
+                "De applicatie heeft toegang tot het internet nodig voor updates.\n\n"
+                "Wil je dat de applicatie automatisch firewall regels toevoegt?\n\n"
+                "Dit is veilig en alleen voor uitgaande verbindingen."
+            )
+            
+            if not result:
+                print("ℹ️ Gebruiker heeft firewall setup geweigerd")
+                return False
+            
+            # Voeg firewall regels toe
+            success = FirewallSetup.add_firewall_rules()
+            
+            if success:
+                messagebox.showinfo(
+                    "✅ Firewall Setup Voltooid", 
+                    "Firewall regels zijn succesvol toegevoegd!\n\n"
+                    "De applicatie kan nu verbinden met GitHub voor updates."
+                )
+                print("✅ Firewall regels toegevoegd")
+            else:
+                messagebox.showwarning(
+                    "⚠️ Firewall Setup Mislukt", 
+                    "Kon firewall regels niet toevoegen.\n\n"
+                    "Updates werken mogelijk niet correct.\n"
+                    "Je kunt dit later handmatig doen."
+                )
+                print("❌ Firewall setup mislukt")
+            
+            return success
+            
+        except Exception as e:
+            print(f"❌ Firewall setup fout: {str(e)}")
+            return False
+    
+    @staticmethod
+    def check_firewall_rules():
+        """Controleer of firewall regels al bestaan"""
+        try:
+            # Controleer voor Diabetes Tracker regel
+            result = subprocess.run(
+                ["netsh", "advfirewall", "firewall", "show", "rule", "name=Diabetes Tracker Python"],
+                capture_output=True, text=True, timeout=10
+            )
+            return "Diabetes Tracker Python" in result.stdout
+        except:
+            return False
+    
+    @staticmethod
+    def add_firewall_rules():
+        """Voeg firewall regels toe"""
+        try:
+            rules = [
+                # Python regel
+                ["netsh", "advfirewall", "firewall", "add", "rule", 
+                 "name=Diabetes Tracker Python", "dir=out", "action=allow", 
+                 "program=python.exe", "enable=yes"],
+                
+                # HTTPS regel voor GitHub
+                ["netsh", "advfirewall", "firewall", "add", "rule", 
+                 "name=Diabetes Tracker HTTPS", "dir=out", "action=allow", 
+                 "protocol=TCP", "remoteport=443", "enable=yes"],
+                
+                # HTTP regel voor fallback
+                ["netsh", "advfirewall", "firewall", "add", "rule", 
+                 "name=Diabetes Tracker HTTP", "dir=out", "action=allow", 
+                 "protocol=TCP", "remoteport=80", "enable=yes"]
+            ]
+            
+            for rule in rules:
+                result = subprocess.run(rule, capture_output=True, text=True, timeout=10)
+                if result.returncode != 0:
+                    print(f"⚠️ Regel toevoegen mislukt: {rule}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Firewall regels toevoegen fout: {str(e)}")
+            return False
 
 class NotificationManager:
     """Beheer notificaties en herinneringen"""
@@ -2718,7 +2826,22 @@ class DiabetesTracker:
             self.activity_other_frame.pack_forget()
 
 def main():
-    root = tb.Window(themename="cosmo")
+    # Start firewall setup voordat de applicatie start
+    print("🚀 Diabetes Tracker wordt gestart...")
+    
+    # Setup firewall regels
+    FirewallSetup.setup_firewall()
+    
+    # Start de applicatie
+    try:
+        import ttkbootstrap as tb
+        root = tb.Window(themename="cosmo")
+    except ImportError:
+        # Fallback naar standaard tkinter als ttkbootstrap niet beschikbaar is
+        root = tk.Tk()
+        root.title("Diabetes Tracker v1.2.5")
+        root.geometry("1200x800")
+    
     app = DiabetesTracker(root)
     root.mainloop()
 
