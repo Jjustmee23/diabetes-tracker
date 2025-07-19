@@ -46,6 +46,7 @@ temp_update/
 # Standalone builds (keep only the main standalone)
 Diabetes_Tracker_Auto_Start/
 Diabetes_Tracker_Portable/
+*.exe
 
 # Release files
 release_v*/
