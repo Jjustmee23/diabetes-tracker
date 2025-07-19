@@ -18,7 +18,7 @@ Een moderne desktop applicatie voor het bijhouden van diabetes gegevens, ontwikk
 ### Voor Ontwikkelaars
 ```bash
 # Clone repository
-git clone https://github.com/[username]/diabetes-tracker.git
+git clone https://github.com/Jjustmee23/diabetes-tracker.git
 cd diabetes-tracker
 
 # Installeer dependencies
