@@ -26,12 +26,20 @@ class UpdateSystem:
     def check_repository_exists(self):
         """Controleer of de repository bestaat"""
         try:
-            response = requests.get(f"https://api.github.com/repos/{self.github_repo}", timeout=5)
+            headers = {
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "Diabetes-Tracker-Update-Checker",
+                "Authorization": "token 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"
+            }
+            response = requests.get(f"https://api.github.com/repos/{self.github_repo}", headers=headers, timeout=5)
             if response.status_code == 404:
-                print(f"⚠️ Repository {self.github_repo} bestaat niet of is privé")
+                print(f"⚠️ Repository {self.github_repo} bestaat niet")
                 print("ℹ️ Update systeem gebruikt lokale informatie")
             elif response.status_code == 200:
-                print(f"✅ Repository {self.github_repo} is bereikbaar")
+                print(f"✅ Repository {self.github_repo} is bereikbaar (privé)")
+            elif response.status_code == 401:
+                print(f"⚠️ Repository {self.github_repo} vereist authenticatie")
+                print("ℹ️ Update systeem gebruikt lokale informatie")
             else:
                 print(f"⚠️ Repository status: {response.status_code}")
         except Exception as e:
@@ -45,15 +53,21 @@ class UpdateSystem:
             # Haal alle releases op van GitHub
             headers = {
                 "Accept": "application/vnd.github.v3+json",
-                "User-Agent": "Diabetes-Tracker-Update-Checker"
+                "User-Agent": "Diabetes-Tracker-Update-Checker",
+                "Authorization": "token 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"
             }
             
             response = requests.get(self.github_api_url, headers=headers, timeout=10)
             
             if response.status_code == 404:
-                print(f"❌ Repository {self.github_repo} bestaat niet of is privé")
+                print(f"❌ Repository {self.github_repo} bestaat niet")
                 if show_result:
                     self.show_repository_not_found()
+                return None
+            elif response.status_code == 401:
+                print(f"❌ Repository {self.github_repo} vereist authenticatie")
+                if show_result:
+                    self.show_authentication_error()
                 return None
             elif response.status_code != 200:
                 print(f"❌ GitHub API fout: {response.status_code}")
@@ -164,13 +178,25 @@ class UpdateSystem:
         """Toon dat repository niet bestaat"""
         messagebox.showwarning(
             "⚠️ Repository Niet Gevonden", 
-            f"De repository {self.github_repo} bestaat niet of is privé.\n\n"
+            f"De repository {self.github_repo} bestaat niet.\n\n"
             "Mogelijke oorzaken:\n"
             "• Repository naam is incorrect\n"
-            "• Repository is privé en vereist authenticatie\n"
             "• Repository is verwijderd\n\n"
             "Updates werken mogelijk niet correct.\n"
             "Controleer de repository instellingen."
+        )
+    
+    def show_authentication_error(self):
+        """Toon authenticatie fout"""
+        messagebox.showwarning(
+            "🔐 Authenticatie Vereist", 
+            f"De repository {self.github_repo} is privé en vereist authenticatie.\n\n"
+            "De applicatie probeert automatisch te authenticeren.\n"
+            "Als dit probleem blijft bestaan, controleer dan:\n"
+            "• API key is geldig\n"
+            "• API key heeft juiste rechten\n"
+            "• Repository toegangsrechten\n\n"
+            "Updates werken mogelijk niet correct."
         )
     
     def show_error(self, error_msg):
