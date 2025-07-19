@@ -1,6 +1,6 @@
-# 🩸 Diabetes Tracker Applicatie
+# 🩸 Diabetes Tracker - Standalone Applicatie
 
-Een moderne desktop applicatie voor het bijhouden van diabetes gegevens, ontwikkeld in Python met Tkinter.
+Een moderne desktop applicatie voor het bijhouden van diabetes gegevens, ontwikkeld in Python met Tkinter. **Standalone .exe versie** - geen Python installatie nodig!
 
 ## 🚀 Features
 
@@ -15,6 +15,12 @@ Een moderne desktop applicatie voor het bijhouden van diabetes gegevens, ontwikk
 
 ## 🛠️ Installatie
 
+### Voor Patiënten (Aanbevolen)
+1. **Download** de laatste release van GitHub
+2. **Extract** het ZIP bestand
+3. **Dubbelklik** op `Diabetes_Tracker.exe`
+4. **Klaar!** - Geen Python of andere software nodig
+
 ### Voor Ontwikkelaars
 ```bash
 # Clone repository
@@ -28,23 +34,21 @@ pip install -r requirements.txt
 python diabetes_tracker.py
 ```
 
-### Voor Patiënten
-1. Download de laatste release van GitHub
-2. Extract het ZIP bestand
-3. Dubbelklik op `Diabetes_Tracker.exe` (Auto-Start versie)
-4. Of dubbelklik op `START_DIABETES_TRACKER.bat` (Standalone versie)
+## 📦 Standalone Versie
 
-## 📦 Standalone Versies
+### Wat is inbegrepen:
+- **Diabetes_Tracker.exe** - Hoofdapplicatie (start direct)
+- **Diabetes_Tracker_Standalone/** - Complete standalone versie
+- **Database** - SQLite database voor data opslag
+- **Backups** - Automatische backup systeem
+- **Templates** - UI templates en styling
 
-### Auto-Start Versie (Aanbevolen)
-- `Diabetes_Tracker_Auto_Start/`
-- Start direct met dubbelklikken op .exe
-- Geen extra stappen nodig
-
-### Klassieke Standalone
-- `Diabetes_Tracker_Standalone/`
-- Start via batch bestand
-- Meer controle over start proces
+### Voordelen:
+- ✅ **Geen Python nodig** - Werkt op elke Windows computer
+- ✅ **Direct starten** - Dubbelklikken op .exe
+- ✅ **Portable** - Kan op USB stick of andere locatie
+- ✅ **Auto-updates** - Automatische updates via GitHub
+- ✅ **Database behoud** - Data blijft altijd behouden
 
 ## 🔄 Update Systeem
 
@@ -112,7 +116,6 @@ diabetes-tracker/
 ```
 
 ### Build Scripts
-- `create_standalone.py` - Maak standalone versie
 - `create_github_release.py` - Maak GitHub release
 - `setup_github_repo.py` - Repository setup
 
@@ -136,4 +139,4 @@ Dit project is ontwikkeld voor medisch gebruik. Neem contact op voor licentie in
 
 ---
 
-**🩸 Diabetes Tracker v1.1.0** - Ontwikkeld voor betere diabetes management
+**🩸 Diabetes Tracker v1.1.0** - Standalone applicatie voor betere diabetes management

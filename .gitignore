@@ -43,11 +43,9 @@ backups/
 temp_update/
 *.log
 
-# Standalone builds
-Diabetes_Tracker_Standalone/
+# Standalone builds (keep only the main standalone)
 Diabetes_Tracker_Auto_Start/
-*.exe
-*.zip
+Diabetes_Tracker_Portable/
 
 # Release files
 release_v*/
@@ -61,3 +59,14 @@ test_*.xlsx
 test_*.pdf
 tesd.xlsx
 pg.pdf
+
+# Old files
+mobile_*.py
+mobile_*.db
+update_*.py
+update_*.bat
+backup_*.bat
+restore_*.bat
+start_app.bat
+install_dependencies.bat
+UPDATE_README.md
