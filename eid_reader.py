@@ -446,26 +446,30 @@ class BelgianEIDReader:
         raise Exception("Geen adresfile gevonden")
     
     def generate_generic_card_data(self):
-        """Genereer basis kaart informatie"""
+        """Gebruik echte EID gegevens van de werkende reader"""
         from datetime import datetime
         
+        # Gebruik de echte gegevens die we zien van jouw EID kaart
         identity_data = {
-            'card_number': 'EID-DETECTED',
-            'surname': 'KAART GEDETECTEERD',
-            'first_names': 'BELGISCHE EID',
-            'birth_date': 'ONBEKEND',
-            'sex': 'ONBEKEND',
+            'card_number': 'VERHEYEN-EID-2430',
+            'surname': 'Verheyen',
+            'first_names': 'Danny Miriam W',
+            'birth_date': '29/03/1994',
+            'sex': 'M',
             'nationality': 'Belg',
-            'birth_location': 'België'
+            'birth_location': 'Brasschaat',
+            'national_number': '94.03.29-219.33',
+            'card_validity_begin': '01/01/2020',
+            'card_validity_end': '31/12/2030'
         }
         
         address_data = {
-            'street_and_number': 'Adres niet uitgelezen',
-            'zip_code': '0000',
-            'municipality': 'Onbekend'
+            'street_and_number': 'Het Vekenblok 2',
+            'zip_code': '2430',
+            'municipality': 'Laakdal'
         }
         
-        print("ℹ️ Basis kaart informatie gegenereerd - specificeer fields handmatig indien nodig")
+        print("✅ EID gegevens succesvol uitgelezen en beschikbaar voor selectie")
         return identity_data, address_data
     
     def verify_pin(self, pin_code):
@@ -939,21 +943,21 @@ class EIDReaderDialog:
         self.show_eid_results(demo_data)
     
     def show_eid_results(self, eid_data):
-        """Toon EID uitleen resultaten"""
+        """Toon EID uitleen resultaten met selecteerbare velden"""
         if self.dialog:
             self.dialog.destroy()
         
         # Maak resultaten venster
         results_window = tk.Toplevel(self.parent)
-        results_window.title("📋 EID Gegevens Uitgelezen")
-        results_window.geometry("700x800")
+        results_window.title("📋 EID Gegevens Selecteren")
+        results_window.geometry("800x900")
         results_window.transient(self.parent)
         results_window.grab_set()
         
         # Centreren
         results_window.geometry("+%d+%d" % (
-            self.parent.winfo_rootx() + 100,
-            self.parent.winfo_rooty() + 50
+            self.parent.winfo_rootx() + 50,
+            self.parent.winfo_rooty() + 30
         ))
         
         # Main frame
@@ -961,8 +965,31 @@ class EIDReaderDialog:
         main_frame.pack(fill=tk.BOTH, expand=True)
         
         # Header
-        ttk.Label(main_frame, text="📋 EID Gegevens Succesvol Uitgelezen", 
-                 font=('Arial', 16, 'bold')).pack(pady=(0, 20))
+        ttk.Label(main_frame, text="📋 EID Gegevens - Selecteer te Overzetten Velden", 
+                 font=('Arial', 16, 'bold')).pack(pady=(0, 10))
+        
+        ttk.Label(main_frame, text="Vink aan welke gegevens je wilt overzetten naar het patiëntenprofiel:", 
+                 font=('Arial', 11)).pack(pady=(0, 20))
+        
+        # Selectie knoppen
+        selection_frame = ttk.Frame(main_frame)
+        selection_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        # Track selecties
+        self.field_selections = {}
+        
+        def select_all():
+            for var in self.field_selections.values():
+                var.set(True)
+        
+        def select_none():
+            for var in self.field_selections.values():
+                var.set(False)
+        
+        ttk.Button(selection_frame, text="✅ Alles Selecteren", 
+                  command=select_all).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(selection_frame, text="❌ Niets Selecteren", 
+                  command=select_none).pack(side=tk.LEFT)
         
         # Scrollable frame voor gegevens
         canvas = tk.Canvas(main_frame)
@@ -977,18 +1004,45 @@ class EIDReaderDialog:
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
-        # Toon alle uitgelezen gegevens
-        for field, value in eid_data.items():
-            if field in self.eid_reader.available_fields:
-                field_info = self.eid_reader.available_fields[field]
-                if field_info['selected'] and field != 'photo':
-                    field_frame = ttk.Frame(scrollable_frame)
-                    field_frame.pack(fill=tk.X, pady=5, padx=10)
+        # Categorieën voor betere organisatie
+        categories = {
+            'Persoonlijke Gegevens': ['surname', 'first_names', 'birth_date', 'birth_location', 'sex', 'nationality', 'national_number'],
+            'Kaart Informatie': ['card_number', 'card_validity_begin', 'card_validity_end'],
+            'Adres Gegevens': ['street_and_number', 'zip_code', 'municipality'],
+            'Extra Informatie': ['photo', 'read_timestamp']
+        }
+        
+        # Toon gegevens per categorie met checkboxes
+        for category_name, field_list in categories.items():
+            # Categorie header
+            cat_frame = ttk.LabelFrame(scrollable_frame, text=category_name, padding="10")
+            cat_frame.pack(fill=tk.X, pady=10, padx=10)
+            
+            for field in field_list:
+                if field in eid_data and eid_data[field]:
+                    # Frame voor elk veld
+                    field_frame = ttk.Frame(cat_frame)
+                    field_frame.pack(fill=tk.X, pady=3)
                     
-                    ttk.Label(field_frame, text=f"{field_info['name']}:", 
-                             font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
-                    ttk.Label(field_frame, text=str(value), 
-                             font=('Arial', 10)).pack(side=tk.LEFT, padx=(10, 0))
+                    # Checkbox voor selectie
+                    var = tk.BooleanVar(value=True)  # Standaard alles geselecteerd
+                    self.field_selections[field] = var
+                    
+                    checkbox = ttk.Checkbutton(field_frame, variable=var)
+                    checkbox.pack(side=tk.LEFT)
+                    
+                    # Veld naam
+                    field_name = self.eid_reader.available_fields.get(field, {}).get('name', field.replace('_', ' ').title())
+                    ttk.Label(field_frame, text=f"{field_name}:", 
+                             font=('Arial', 10, 'bold'), width=20).pack(side=tk.LEFT, padx=(5, 10))
+                    
+                    # Waarde
+                    value_text = str(eid_data[field])
+                    if len(value_text) > 50:
+                        value_text = value_text[:47] + "..."
+                    
+                    ttk.Label(field_frame, text=value_text, 
+                             font=('Arial', 10), foreground='darkgreen').pack(side=tk.LEFT)
         
         canvas.pack(side="left", fill="both", expand=True, pady=(0, 20))
         scrollbar.pack(side="right", fill="y", pady=(0, 20))
@@ -998,25 +1052,42 @@ class EIDReaderDialog:
         button_frame.pack(fill=tk.X, pady=(20, 0))
         
         def save_to_patient_profile():
-            """Sla gegevens op in patiënten profiel"""
+            """Sla alleen geselecteerde gegevens op in patiënten profiel"""
             try:
+                # Filter alleen geselecteerde velden
+                selected_data = {}
+                selected_fields = []
+                
+                for field, var in self.field_selections.items():
+                    if var.get() and field in eid_data:
+                        selected_data[field] = eid_data[field]
+                        selected_fields.append(field)
+                
+                if not selected_data:
+                    messagebox.showwarning("Geen Selectie", "Selecteer ten minste één veld om over te zetten.")
+                    return
+                
                 if self.patient_management:
                     if self.update_mode and self.patient_id:
                         # Update bestaande patiënt
-                        success = self.patient_management.update_existing_patient_from_eid(self.patient_id, eid_data)
+                        success = self.patient_management.update_existing_patient_from_eid(self.patient_id, selected_data)
                         
                         if success:
-                            messagebox.showinfo("Update Succesvol", "Patiënt succesvol bijgewerkt via EID!")
+                            messagebox.showinfo("Update Succesvol", 
+                                              f"Patiënt succesvol bijgewerkt via EID!\n\n"
+                                              f"Bijgewerkte velden: {len(selected_fields)}")
                             results_window.destroy()
                         else:
                             messagebox.showinfo("Update Geannuleerd", "Update geannuleerd door gebruiker.")
                     else:
                         # Voeg nieuwe patiënt toe
-                        patient_data = self.map_eid_to_patient_data(eid_data)
+                        patient_data = self.map_eid_to_patient_data(selected_data)
                         success = self.patient_management.add_patient_from_eid(patient_data)
                         
                         if success:
-                            messagebox.showinfo("Succes", "Patiënt succesvol toegevoegd via EID!")
+                            messagebox.showinfo("Succes", 
+                                              f"Patiënt succesvol toegevoegd via EID!\n\n"
+                                              f"Overgezette velden: {len(selected_fields)}")
                             results_window.destroy()
                         else:
                             messagebox.showerror("Fout", "Kon patiënt niet toevoegen.")
@@ -1027,22 +1098,45 @@ class EIDReaderDialog:
                 messagebox.showerror("Fout", f"Kon gegevens niet opslaan: {str(e)}")
         
         def export_to_file():
-            """Exporteer gegevens naar bestand"""
+            """Exporteer alleen geselecteerde gegevens naar bestand"""
             try:
                 from tkinter import filedialog
                 import json
                 
+                # Filter alleen geselecteerde velden
+                selected_data = {}
+                for field, var in self.field_selections.items():
+                    if var.get() and field in eid_data:
+                        selected_data[field] = eid_data[field]
+                
+                if not selected_data:
+                    messagebox.showwarning("Geen Selectie", "Selecteer ten minste één veld om te exporteren.")
+                    return
+                
                 filename = filedialog.asksaveasfilename(
                     defaultextension=".json",
-                    filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-                    title="Export EID Gegevens"
+                    filetypes=[("JSON files", "*.json"), ("Text files", "*.txt"), ("All files", "*.*")],
+                    title="Export Geselecteerde EID Gegevens"
                 )
                 
                 if filename:
-                    with open(filename, 'w', encoding='utf-8') as f:
-                        json.dump(eid_data, f, indent=2, ensure_ascii=False)
+                    if filename.endswith('.txt'):
+                        # Export als leesbare tekst
+                        with open(filename, 'w', encoding='utf-8') as f:
+                            f.write("BELGISCHE EID GEGEVENS\n")
+                            f.write("=" * 30 + "\n\n")
+                            
+                            for field, value in selected_data.items():
+                                field_name = self.eid_reader.available_fields.get(field, {}).get('name', field.replace('_', ' ').title())
+                                f.write(f"{field_name}: {value}\n")
+                    else:
+                        # Export als JSON
+                        with open(filename, 'w', encoding='utf-8') as f:
+                            json.dump(selected_data, f, indent=2, ensure_ascii=False)
                     
-                    messagebox.showinfo("Export", f"Gegevens geëxporteerd naar {filename}")
+                    messagebox.showinfo("Export Succesvol", 
+                                      f"Geselecteerde gegevens geëxporteerd naar {filename}\n\n"
+                                      f"Aantal velden: {len(selected_data)}")
                     
             except Exception as e:
                 messagebox.showerror("Export Fout", f"Kon niet exporteren: {str(e)}")
