@@ -1283,24 +1283,19 @@ class DiabetesTracker:
                     ttk.Label(med_frame, text=f"{med['name']} - {med['dosage']}", 
                              font=('Arial', 10)).pack(side=tk.LEFT)
                     
-                    # Checkboxen
+                    # Checkboxen - alleen "Genomen" optie
                     taken_var = tk.BooleanVar()
-                    missed_var = tk.BooleanVar()
                     
-                    ttk.Checkbutton(med_frame, text="✅ Genomen", variable=taken_var, 
-                                  command=lambda t=taken_var, m=missed_var: self.on_taken_check(t, m)).pack(side=tk.LEFT, padx=(10, 5))
-                    ttk.Checkbutton(med_frame, text="❌ Vergeten", variable=missed_var,
-                                  command=lambda t=taken_var, m=missed_var: self.on_missed_check(t, m)).pack(side=tk.LEFT, padx=5)
+                    ttk.Checkbutton(med_frame, text="✅ Genomen", variable=taken_var).pack(side=tk.LEFT, padx=(10, 5))
                     
                     # Opslaan knop
                     ttk.Button(med_frame, text="💾", width=3,
-                              command=lambda med_id=med['id'], time_key=time_key, taken=taken_var, missed=missed_var: 
-                              self.save_medication_compliance(med_id, time_key, taken, missed)).pack(side=tk.LEFT, padx=(10, 0))
+                              command=lambda med_id=med['id'], time_key=time_key, taken=taken_var: 
+                              self.save_medication_compliance_simple(med_id, time_key, taken)).pack(side=tk.LEFT, padx=(10, 0))
                     
                     # Sla variabelen op
                     self.compliance_vars[f"{med['id']}_{time_key}"] = {
-                        'taken': taken_var,
-                        'missed': missed_var
+                        'taken': taken_var
                     }
             else:
                 ttk.Label(time_frame, text="Geen medicatie", 
@@ -2168,6 +2163,52 @@ class DiabetesTracker:
         except Exception as e:
             messagebox.showerror("Fout", f"Er is een onverwachte fout opgetreden: {str(e)}")
     
+    def save_medication_compliance_simple(self, med_id, time_key, taken_var):
+        """Sla medicatie compliance op in database (alleen genomen/vergeten)"""
+        try:
+            # Haal patiënt ID op
+            self.patient_profile.patient_cursor.execute('''
+                SELECT id FROM patients ORDER BY id LIMIT 1
+            ''')
+            patient_result = self.patient_profile.patient_cursor.fetchone()
+            
+            if not patient_result:
+                messagebox.showwarning("Waarschuwing", "Geen patiënt gevonden.")
+                return
+            
+            patient_id = patient_result[0]
+            today = datetime.now().strftime("%Y-%m-%d")
+            time_hour = {"morning": "08", "afternoon": "12", "evening": "18", "night": "22"}[time_key]
+            
+            taken = taken_var.get()
+            missed = not taken  # Als niet genomen, dan vergeten
+            
+            # Verwijder bestaande entry voor vandaag
+            self.patient_profile.patient_cursor.execute('''
+                DELETE FROM medication_schedule 
+                WHERE patient_id = ? AND medication_id = ? AND date = ? AND scheduled_time = ?
+            ''', (patient_id, med_id, today, f"{time_hour}:00"))
+            
+            # Voeg nieuwe status toe
+            self.patient_profile.patient_cursor.execute('''
+                INSERT INTO medication_schedule (patient_id, medication_id, scheduled_time, taken, missed, date)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (patient_id, med_id, f"{time_hour}:00", taken, missed, today))
+                
+            self.patient_profile.patient_conn.commit()
+            
+            # Update statistieken
+            self.update_compliance_stats()
+            
+            # Toon bevestiging
+            status = "genomen" if taken else "niet genomen"
+            messagebox.showinfo("Succes", f"Medicatie compliance opgeslagen: {status}")
+            
+        except sqlite3.Error as e:
+            messagebox.showerror("Database Fout", f"Er is een database fout opgetreden: {str(e)}")
+        except Exception as e:
+            messagebox.showerror("Fout", f"Er is een onverwachte fout opgetreden: {str(e)}")
+    
     def update_compliance_stats(self):
         """Update compliance statistieken"""
         try:
@@ -2204,11 +2245,11 @@ class DiabetesTracker:
             
             compliance_rate = (taken_meds / total_meds * 100) if total_meds > 0 else 0
             
-            stats_text = f"📊 Compliance: {compliance_rate:.1f}% | ✅ Genomen: {taken_meds} | ❌ Vergeten: {missed_meds} | 📋 Totaal: {total_meds}"
+            stats_text = f"📊 Compliance: {compliance_rate:.1f}% | ✅ Genomen: {taken_meds} | 📋 Totaal: {total_meds}"
             
             if compliance_rate < 80:
                 stats_text += " ⚠️ Verbetering nodig"
-                self.compliance_stats_label.config(text=stats_text, foreground='red')
+                self.compliance_stats_label.config(text=stats_text, foreground='orange')
             elif compliance_rate >= 90:
                 stats_text += " 🎉 Uitstekend!"
                 self.compliance_stats_label.config(text=stats_text, foreground='green')
