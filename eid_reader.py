@@ -788,20 +788,44 @@ class EIDReaderDialog:
             messagebox.showerror("EID Fout", f"Kon EID niet uitlezen:\n\n{str(e)}")
     
     def read_public_data_direct(self):
-        """Lees EID gegevens en toon direct resultaten"""
+        """Lees EID gegevens en verwerk automatisch zonder dialoog"""
         try:
-            # Selecteer gewenste velden
-            selected_fields = {field: info for field, info in self.eid_reader.available_fields.items() 
-                             if info['selected']}
-            
             # Lees EID data zonder PIN
             eid_data = self.eid_reader.read_full_eid_data(pin_code=None)
             
-            # Toon resultaten direct
-            self.show_eid_results(eid_data)
+            if self.update_mode and self.patient_id:
+                # Voor update mode: direct bijwerken zonder veld selectie
+                self.auto_update_patient(eid_data)
+            else:
+                # Voor nieuwe patiënt: toon selectie
+                self.show_eid_results(eid_data)
             
         except Exception as e:
             messagebox.showerror("EID Fout", f"Kon EID niet uitlezen:\n\n{str(e)}")
+    
+    def auto_update_patient(self, eid_data):
+        """Automatisch patiënt bijwerken zonder selectie dialoog"""
+        try:
+            if self.patient_management:
+                # Gebruik alle beschikbare gegevens
+                success = self.patient_management.update_existing_patient_from_eid(self.patient_id, eid_data)
+                
+                if success:
+                    # Succes melding en terug naar patiënt management
+                    field_count = len([k for k, v in eid_data.items() if v and v != 'N/A'])
+                    messagebox.showinfo("Update Succesvol", 
+                                      f"Patiënt succesvol bijgewerkt via EID!\n\n"
+                                      f"Bijgewerkte velden: {field_count}")
+                
+                # Breng patiënt management venster naar voren
+                if hasattr(self.patient_management, 'root') and self.patient_management.root:
+                    self.patient_management.root.lift()
+                    self.patient_management.root.focus_force()
+            else:
+                messagebox.showerror("Fout", "Patiënten management niet beschikbaar.")
+                
+        except Exception as e:
+            messagebox.showerror("Fout", f"Kon patiënt niet bijwerken: {str(e)}")
     
     def read_card_with_pin_thread(self):
         """Lees kaart met PIN voor certificaten"""
