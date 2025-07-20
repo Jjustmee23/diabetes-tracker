@@ -1073,9 +1073,10 @@ class DiabetesTracker:
         main_frame.rowconfigure(0, weight=0)  # Header
         main_frame.rowconfigure(1, weight=0)  # Quick Actions buttons
         main_frame.rowconfigure(2, weight=0)  # Input card
-        main_frame.rowconfigure(3, weight=0)  # Overview card
-        main_frame.rowconfigure(4, weight=1)  # History card (expandable)
-        main_frame.rowconfigure(5, weight=0)  # Status bar
+        main_frame.rowconfigure(3, weight=0)  # Medication Compliance card
+        main_frame.rowconfigure(4, weight=0)  # History card
+        main_frame.rowconfigure(5, weight=0)  # Overview card
+        main_frame.rowconfigure(6, weight=0)  # Status bar
 
         # Header met titel en patiënt knop
         header_frame = ttk.Frame(main_frame)
@@ -1101,12 +1102,6 @@ class DiabetesTracker:
         # Knoppen frame
         buttons_frame = ttk.Frame(actions_card)
         buttons_frame.pack(fill=tk.X)
-
-        # Medicatie Compliance knop
-        compliance_button = ttk.Button(buttons_frame, text="💊 Medicatie Compliance", 
-                                     command=self.show_medication_compliance, style='warning.TButton', width=25)
-        compliance_button.pack(side=tk.LEFT, padx=(0, 15))
-        self.create_tooltip(compliance_button, "Beheer medicatie compliance voor vandaag")
 
         # Statistieken knop
         stats_button = ttk.Button(buttons_frame, text="📊 Statistieken & Grafieken", 
@@ -1234,7 +1229,7 @@ class DiabetesTracker:
         self.notes_entry.pack(side=tk.LEFT, padx=(10, 0))
         self.create_tooltip(self.notes_entry, "Voeg extra notities toe (optioneel)")
         
-        # Knoppen - groot en prominent met keyboard shortcuts
+                # Knoppen - groot en prominent met keyboard shortcuts
         button_frame = ttk.Frame(input_card)
         button_frame.pack(fill=tk.X)
         
@@ -1252,7 +1247,100 @@ class DiabetesTracker:
         self.root.bind('<Control-s>', lambda e: self.add_entry())
         self.root.bind('<Control-l>', lambda e: self.clear_entries())
         
+        # Medicatie Compliance Card - Direct zichtbaar
+        compliance_card = ttk.LabelFrame(main_frame, text="💊 Medicatie Compliance - Vandaag", padding="20")
+        compliance_card.grid(row=3, column=0, sticky="ew", pady=(0, 20))
+        compliance_card.columnconfigure(0, weight=1)
+        
+        # Compliance frame
+        compliance_frame = ttk.Frame(compliance_card)
+        compliance_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Tijdstippen
+        times = [
+            ("🌅 Ochtend (08:00)", "morning"),
+            ("☀️ Middag (12:00)", "afternoon"), 
+            ("🌆 Avond (18:00)", "evening"),
+            ("🌙 Nacht (22:00)", "night")
+        ]
+        
+        self.compliance_vars = {}
+        
+        for i, (time_label, time_key) in enumerate(times):
+            time_frame = ttk.LabelFrame(compliance_frame, text=time_label, padding="15")
+            time_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+            time_frame.columnconfigure(0, weight=1)
+            
+            # Haal medicatie op voor dit tijdstip
+            medications_for_time = self.get_medications_for_time(time_key)
+            
+            if medications_for_time:
+                for med in medications_for_time:
+                    med_frame = ttk.Frame(time_frame)
+                    med_frame.pack(fill=tk.X, expand=True, pady=2)
+                    
+                    # Medicatie naam
+                    ttk.Label(med_frame, text=f"{med['name']} - {med['dosage']}", 
+                             font=('Arial', 10)).pack(side=tk.LEFT)
+                    
+                    # Checkboxen
+                    taken_var = tk.BooleanVar()
+                    missed_var = tk.BooleanVar()
+                    
+                    ttk.Checkbutton(med_frame, text="✅ Genomen", variable=taken_var, 
+                                  command=lambda t=taken_var, m=missed_var: self.on_taken_check(t, m)).pack(side=tk.LEFT, padx=(10, 5))
+                    ttk.Checkbutton(med_frame, text="❌ Vergeten", variable=missed_var,
+                                  command=lambda t=taken_var, m=missed_var: self.on_missed_check(t, m)).pack(side=tk.LEFT, padx=5)
+                    
+                    # Opslaan knop
+                    ttk.Button(med_frame, text="💾", width=3,
+                              command=lambda med_id=med['id'], time_key=time_key, taken=taken_var, missed=missed_var: 
+                              self.save_medication_compliance(med_id, time_key, taken, missed)).pack(side=tk.LEFT, padx=(10, 0))
+                    
+                    # Sla variabelen op
+                    self.compliance_vars[f"{med['id']}_{time_key}"] = {
+                        'taken': taken_var,
+                        'missed': missed_var
+                    }
+            else:
+                ttk.Label(time_frame, text="Geen medicatie", 
+                         font=('Arial', 10), foreground='gray').pack(pady=10)
+        
+        # Compliance statistieken
+        stats_frame = ttk.Frame(compliance_frame)
+        stats_frame.pack(fill=tk.X, pady=(20, 0))
+        
+        self.compliance_stats_label = ttk.Label(stats_frame, text="", font=('Arial', 12, 'bold'))
+        self.compliance_stats_label.pack()
+        
+        # Update compliance statistieken
+        self.update_compliance_stats()
 
+        # Geschiedenis Card
+        history_card = ttk.LabelFrame(main_frame, text="📋 Geschiedenis", padding="20")
+        history_card.grid(row=4, column=0, sticky="nsew", pady=(0, 20))
+        history_card.columnconfigure(0, weight=1)
+        history_card.rowconfigure(0, weight=1)
+        
+        # Treeview voor data met grotere font
+        columns = ('Datum', 'Tijd', 'Bloedwaarde', 'Medicatie', 'Activiteit', 'Gewicht', 'Opmerkingen', 'Medicatie Hoeveelheid', 'Insuline ingenomen', 'Insuline vergeten')
+        self.tree = ttk.Treeview(history_card, columns=columns, show='headings', height=12)
+        
+        # Kolom headers
+        for col in columns:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=130)
+        
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(history_card, orient=tk.VERTICAL, command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        
+        # Verwijder knop
+        ttk.Button(history_card, text="🗑️ Verwijder Selectie", command=self.delete_selected, 
+                  style='danger.TButton').grid(row=1, column=0, pady=(15, 0))
 
         # Overzicht Card
         overview_card = ttk.LabelFrame(main_frame, text="📊 Overzicht Ingevoerde Waarden", padding="25")
@@ -1287,39 +1375,13 @@ class DiabetesTracker:
         # Update overzicht
         self.update_overview_stats()
         
-        # Geschiedenis Card
-        history_card = ttk.LabelFrame(main_frame, text="📋 Geschiedenis", padding="20")
-        history_card.grid(row=7, column=0, sticky="nsew", pady=(0, 20))
-        history_card.columnconfigure(0, weight=1)
-        history_card.rowconfigure(0, weight=1)
-        
-        # Treeview voor data met grotere font
-        columns = ('Datum', 'Tijd', 'Bloedwaarde', 'Medicatie', 'Activiteit', 'Gewicht', 'Opmerkingen', 'Medicatie Hoeveelheid', 'Insuline ingenomen', 'Insuline vergeten')
-        self.tree = ttk.Treeview(history_card, columns=columns, show='headings', height=12)
-        
-        # Kolom headers
-        for col in columns:
-            self.tree.heading(col, text=col)
-            self.tree.column(col, width=130)
-        
-        # Scrollbar
-        scrollbar = ttk.Scrollbar(history_card, orient=tk.VERTICAL, command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-        
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        
-        # Verwijder knop
-        ttk.Button(history_card, text="🗑️ Verwijder Selectie", command=self.delete_selected, 
-                  style='danger.TButton').grid(row=1, column=0, pady=(15, 0))
-        
 
 
         # Status bar
         self.status_var = tk.StringVar()
         self.status_var.set("Klaar")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.grid(row=8, column=0, sticky="ew", pady=(10, 0))
+        status_bar.grid(row=6, column=0, sticky="ew", pady=(10, 0))
     
     def get_patient_medications(self):
         """Haal medicatie op van de patiënt uit de patiënten fiche"""
