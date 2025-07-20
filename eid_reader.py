@@ -1078,16 +1078,22 @@ class EIDReaderDialog:
                 
                 if self.patient_management:
                     if self.update_mode and self.patient_id:
-                        # Update bestaande patiënt
+                        # Update bestaande patiënt - direct zonder melding
                         success = self.patient_management.update_existing_patient_from_eid(self.patient_id, selected_data)
                         
+                        # Sluit venster en ga terug naar patiënt management
+                        results_window.destroy()
+                        
                         if success:
+                            # Melding tonen en terug naar patiënt management
                             messagebox.showinfo("Update Succesvol", 
                                               f"Patiënt succesvol bijgewerkt via EID!\n\n"
                                               f"Bijgewerkte velden: {len(selected_fields)}")
-                            results_window.destroy()
-                        else:
-                            messagebox.showinfo("Update Geannuleerd", "Update geannuleerd door gebruiker.")
+                        
+                        # Breng patiënt management venster naar voren
+                        if hasattr(self.patient_management, 'root') and self.patient_management.root:
+                            self.patient_management.root.lift()
+                            self.patient_management.root.focus_force()
                     else:
                         # Voeg nieuwe patiënt toe
                         patient_data = self.map_eid_to_patient_data(selected_data)
