@@ -7,13 +7,18 @@ import json
 from tkcalendar import DateEntry
 import ttkbootstrap as tb
 
-# EID Reader import (fallback als niet beschikbaar)
+# EID Reader import en status check
 try:
-    from eid_reader import show_eid_reader_dialog
-    EID_READER_AVAILABLE = True
+    from eid_reader import show_eid_reader_dialog, SMARTCARD_AVAILABLE, show_eid_not_available
+    EID_READER_AVAILABLE = SMARTCARD_AVAILABLE
+    if EID_READER_AVAILABLE:
+        print("✅ EID Reader beschikbaar")
+    else:
+        print("⚠️ Smartcard libraries niet geïnstalleerd - EID functionaliteit is beperkt")
 except ImportError:
     EID_READER_AVAILABLE = False
-    print("⚠️ EID Reader niet beschikbaar")
+    show_eid_not_available = None
+    print("⚠️ EID Reader module niet beschikbaar")
 
 class PatientProfile:
     def __init__(self, parent):
@@ -413,7 +418,7 @@ class PatientProfile:
                           style='info.TButton').pack(side=tk.LEFT)
             else:
                 ttk.Button(edit_buttons_frame, text="🆔 EID (Niet Beschikbaar)", 
-                          command=self.show_eid_not_available,
+                          command=show_eid_not_available if show_eid_not_available else lambda: None,
                           state='disabled').pack(side=tk.LEFT)
         else:
             # Nieuwe patiënt toevoegen
@@ -434,8 +439,8 @@ class PatientProfile:
                           style='info.TButton').pack(side=tk.LEFT)
             else:
                 ttk.Button(buttons_frame, text="🆔 EID (Niet Beschikbaar)", 
-                          command=self.show_eid_not_available,
-                          state='disabled').pack(side=tk.LEFT)
+                          command=show_eid_not_available if show_eid_not_available else lambda: None,
+                          state='disabled').pack(side=tk.Left)
         
         # Tab 2: Medicatie Beheer
         medication_frame = ttk.Frame(notebook)
@@ -471,7 +476,8 @@ class PatientProfile:
         """Voeg patiënt toe via EID kaart"""
         try:
             if not EID_READER_AVAILABLE:
-                self.show_eid_not_available()
+                if show_eid_not_available:
+                    show_eid_not_available()
                 return
             
             # Start EID reader dialoog
@@ -480,18 +486,7 @@ class PatientProfile:
         except Exception as e:
             messagebox.showerror("EID Fout", f"Kon EID reader niet starten: {str(e)}")
     
-    def show_eid_not_available(self):
-        """Toon melding dat EID niet beschikbaar is"""
-        messagebox.showinfo(
-            "EID Niet Beschikbaar", 
-            "EID card reader functionaliteit is niet beschikbaar.\n\n"
-            "Om EID kaarten te kunnen uitlezen, moeten de volgende\n"
-            "bibliotheken geïnstalleerd worden:\n"
-            "• pyscard\n"
-            "• smartcard\n"
-            "• cryptography\n\n"
-            "Installeer deze via: pip install pyscard smartcard cryptography"
-        )
+
     
     def add_patient_from_eid(self, eid_data):
         """Voeg patiënt toe vanuit EID gegevens"""
@@ -627,7 +622,8 @@ class PatientProfile:
         """Update bestaande patiënt via EID kaart"""
         try:
             if not EID_READER_AVAILABLE:
-                self.show_eid_not_available()
+                if show_eid_not_available:
+                    show_eid_not_available()
                 return
             
             # Bewaar patient_id voor later gebruik

@@ -11,17 +11,19 @@ import time
 from datetime import datetime
 import base64
 
-# EID Reader dependencies (fallback als niet geïnstalleerd)
+# EID Reader dependencies - Echte smartcard functionaliteit
 try:
     from smartcard.System import readers
-    from smartcard.util import toHexString
+    from smartcard.util import toHexString, toBytes
     from smartcard.CardType import AnyCardType
     from smartcard.CardRequest import CardRequest
-    from smartcard.Exceptions import CardRequestTimeoutException, NoCardException
+    from smartcard.CardConnection import CardConnection
+    from smartcard.Exceptions import CardRequestTimeoutException, NoCardException, CardConnectionException
     SMARTCARD_AVAILABLE = True
-except ImportError:
+    print("✅ Smartcard libraries succesvol geladen")
+except ImportError as e:
     SMARTCARD_AVAILABLE = False
-    print("⚠️ Smartcard libraries niet geïnstalleerd - EID functionaliteit is beperkt")
+    print(f"⚠️ Smartcard libraries niet geïnstalleerd: {e}")
 
 class BelgianEIDReader:
     def __init__(self, parent):
@@ -143,54 +145,22 @@ class BelgianEIDReader:
             apdu = [0x00, 0xB0, (offset >> 8) & 0xFF, offset & 0xFF, length]
             return self.send_apdu(apdu)
     
-    def parse_identity_data(self, data):
-        """Parse identiteitsgegevens"""
-        if not data:
-            return {}
-        
+    def get_eid_application_info(self):
+        """Haal EID applicatie informatie op"""
         try:
-            # Converteer naar string en parse TLV structuur
-            # Dit is een vereenvoudigde implementatie - echte EID parsing is complexer
-            identity = {}
+            # Select EID application
+            # AID voor Belgische EID: A000000177504B43532D31
+            eid_aid = [0xA0, 0x00, 0x00, 0x01, 0x77, 0x50, 0x4B, 0x43, 0x53, 0x2D, 0x31]
+            apdu = [0x00, 0xA4, 0x04, 0x00, len(eid_aid)] + eid_aid
             
-            # Simuleer data parsing (in echte implementatie zou dit TLV parsing zijn)
-            if len(data) > 10:
-                # Dummy data voor demonstratie
-                identity = {
-                    'card_number': 'Demo-12345',
-                    'national_number': '00000000000',
-                    'surname': 'DEMO',
-                    'first_names': 'TEST PATIENT',
-                    'birth_date': '01/01/1990',
-                    'sex': 'M',
-                    'nationality': 'Belg',
-                    'birth_location': 'Demo Stad'
-                }
-            
-            return identity
+            response = self.send_apdu(apdu)
+            print("✅ EID applicatie geselecteerd")
+            return True
             
         except Exception as e:
-            print(f"Fout bij parsen identiteitsgegevens: {str(e)}")
-            return {}
-    
-    def parse_address_data(self, data):
-        """Parse adresgegevens"""
-        if not data:
-            return {}
-        
-        try:
-            # Simuleer adres parsing
-            address = {
-                'street_and_number': 'Demostraat 123',
-                'zip_code': '1000',
-                'municipality': 'Demo Gemeente'
-            }
-            
-            return address
-            
-        except Exception as e:
-            print(f"Fout bij parsen adresgegevens: {str(e)}")
-            return {}
+            print(f"Fout bij selecteren EID applicatie: {str(e)}")
+            # Probeer alternatieve methode
+            return False
     
     def read_photo(self):
         """Lees pasfoto van kaart"""
@@ -209,36 +179,56 @@ class BelgianEIDReader:
             return None
     
     def read_full_eid_data(self, pin_code=None):
-        """Lees alle EID gegevens"""
+        """Lees alle EID gegevens van echte kaart"""
         try:
-            # Lees identiteitsgegevens
-            self.select_file(self.file_ids['identity'])
-            identity_data = self.read_binary()
-            identity = self.parse_identity_data(identity_data)
+            if not SMARTCARD_AVAILABLE:
+                raise Exception("Smartcard libraries niet beschikbaar")
             
-            # Lees adresgegevens
-            self.select_file(self.file_ids['address'])
-            address_data = self.read_binary()
-            address = self.parse_address_data(address_data)
+            # Verbind met kaart
+            self.connect_to_card()
             
-            # Combineer alle gegevens
-            all_data = {**identity, **address}
+            # Selecteer EID applicatie
+            self.get_eid_application_info()
             
-            # Voeg foto toe als geselecteerd
+            # PIN verificatie indien vereist
+            if pin_code:
+                self.verify_pin(pin_code)
+            
+            # Lees identiteitsbestand
+            identity_data = {}
+            try:
+                self.select_file(self.file_ids['identity'])
+                raw_data = self.read_binary()
+                identity_data = self.parse_eid_tlv_data(raw_data, 'identity')
+            except Exception as e:
+                print(f"Waarschuwing: Kon identiteitsgegevens niet lezen: {e}")
+            
+            # Lees adresbestand
+            address_data = {}
+            try:
+                self.select_file(self.file_ids['address'])
+                raw_data = self.read_binary()
+                address_data = self.parse_eid_tlv_data(raw_data, 'address')
+            except Exception as e:
+                print(f"Waarschuwing: Kon adresgegevens niet lezen: {e}")
+            
+            # Lees foto indien geselecteerd
+            photo_data = None
             if self.available_fields['photo']['selected']:
-                photo = self.read_photo()
-                if photo:
-                    all_data['photo'] = photo
+                try:
+                    photo_data = self.read_photo()
+                except Exception as e:
+                    print(f"Waarschuwing: Kon foto niet lezen: {e}")
             
-            # Voeg kaart metadata toe
-            all_data.update({
-                'card_validity_begin': '01/01/2020',
-                'card_validity_end': '31/12/2030',
-                'card_delivery_municipality': 'Demo Gemeente',
-                'chip_number': 'DEMO-CHIP-001',
-                'document_type': 'Belgische identiteitskaart',
-                'read_timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            })
+            # Combineer alle data
+            all_data = {**identity_data, **address_data}
+            
+            if photo_data:
+                all_data['photo'] = photo_data
+            
+            # Voeg metadata toe
+            all_data['read_timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            all_data['reader_version'] = 'Diabetes Tracker EID Reader v1.3.1'
             
             self.card_data = all_data
             return all_data
@@ -246,16 +236,113 @@ class BelgianEIDReader:
         except Exception as e:
             print(f"Fout bij lezen EID data: {str(e)}")
             raise
+        finally:
+            self.disconnect()
+    
+    def parse_eid_tlv_data(self, raw_data, data_type):
+        """Parse EID TLV (Tag-Length-Value) data"""
+        if not raw_data:
+            return {}
+        
+        try:
+            data = {}
+            i = 0
+            
+            while i < len(raw_data):
+                if i + 1 >= len(raw_data):
+                    break
+                    
+                tag = raw_data[i]
+                length = raw_data[i + 1] if i + 1 < len(raw_data) else 0
+                
+                if length == 0 or i + 2 + length > len(raw_data):
+                    break
+                
+                value_bytes = raw_data[i + 2:i + 2 + length]
+                
+                # Converteer naar string (UTF-8)
+                try:
+                    value = bytes(value_bytes).decode('utf-8').strip()
+                except:
+                    value = ''.join([chr(b) for b in value_bytes if 32 <= b <= 126]).strip()
+                
+                # Map tags naar veld namen
+                if data_type == 'identity':
+                    field_mapping = {
+                        1: 'card_number',
+                        2: 'chip_number', 
+                        3: 'card_validity_begin',
+                        4: 'card_validity_end',
+                        5: 'card_delivery_municipality',
+                        6: 'national_number',
+                        7: 'surname',
+                        8: 'first_names',
+                        9: 'first_letter_third_given_name',
+                        10: 'nationality',
+                        11: 'birth_location',
+                        12: 'birth_date',
+                        13: 'sex',
+                        14: 'noble_condition',
+                        15: 'document_type',
+                        16: 'special_status'
+                    }
+                elif data_type == 'address':
+                    field_mapping = {
+                        1: 'street_and_number',
+                        2: 'zip_code',
+                        3: 'municipality'
+                    }
+                else:
+                    field_mapping = {}
+                
+                if tag in field_mapping and value:
+                    data[field_mapping[tag]] = value
+                
+                i += 2 + length
+            
+            return data
+            
+        except Exception as e:
+            print(f"TLV parsing fout voor {data_type}: {str(e)}")
+            return {}
     
     def verify_pin(self, pin_code):
-        """Verifieer PIN code"""
+        """Verifieer PIN code op echte kaart"""
         try:
-            # In echte implementatie zou hier PIN verificatie plaatsvinden
-            # Voor demo accepteren we elke 4-cijferige code
-            if len(pin_code) == 4 and pin_code.isdigit():
+            if not pin_code or len(pin_code) != 4 or not pin_code.isdigit():
+                raise Exception("PIN code moet exact 4 cijfers bevatten")
+            
+            # APDU voor PIN verificatie op Belgische EID
+            # VERIFY commando (0x00, 0x20, 0x00, 0x01)
+            pin_bytes = [int(d) for d in pin_code]
+            
+            # Pad PIN naar 8 bytes met 0xFF
+            padded_pin = pin_bytes + [0xFF] * (8 - len(pin_bytes))
+            
+            apdu = [0x00, 0x20, 0x00, 0x01, 0x08] + padded_pin
+            
+            try:
+                response = self.send_apdu(apdu)
+                print("✅ PIN verificatie succesvol")
                 return True
-            else:
-                raise Exception("PIN code moet 4 cijfers bevatten")
+                
+            except Exception as e:
+                # Check specifieke foutcodes
+                error_msg = str(e)
+                if "6983" in error_msg:
+                    raise Exception("PIN geblokkeerd - te veel foute pogingen")
+                elif "63C" in error_msg:
+                    # Extract remaining attempts from SW2
+                    if "63C2" in error_msg:
+                        raise Exception("Foute PIN - nog 2 pogingen over")
+                    elif "63C1" in error_msg:
+                        raise Exception("Foute PIN - nog 1 poging over")
+                    else:
+                        raise Exception("Foute PIN - beperkt aantal pogingen over")
+                elif "6A86" in error_msg:
+                    raise Exception("Verkeerde PIN lengte")
+                else:
+                    raise Exception(f"PIN verificatie mislukt: {error_msg}")
                 
         except Exception as e:
             print(f"PIN verificatie fout: {str(e)}")
@@ -281,6 +368,10 @@ class EIDReaderDialog:
         self.max_pin_attempts = 3
         self.update_mode = update_mode
         self.patient_id = patient_id
+    
+    def show_eid_not_available(self):
+        """Toon melding dat EID functionaliteit niet beschikbaar is"""
+        show_eid_not_available()
         
     def show_field_selection_dialog(self):
         """Toon dialoog voor selectie van uit te lezen velden"""
@@ -754,9 +845,23 @@ class EIDReaderDialog:
         
         messagebox.showerror("EID Fout", f"Kon EID niet uitlezen:\n\n{error_message}")
 
+def show_eid_not_available():
+    """Toon melding dat EID functionaliteit niet beschikbaar is"""
+    messagebox.showerror(
+        "EID Niet Beschikbaar", 
+        "EID functionaliteit is niet beschikbaar.\n\n"
+        "Smartcard libraries zijn niet geïnstalleerd.\n"
+        "Installeer pyscard om EID functionaliteit te gebruiken:\n\n"
+        "pip install pyscard"
+    )
+
 def show_eid_reader_dialog(parent, patient_management=None, update_mode=False, patient_id=None):
     """Hoofdfunctie om EID reader dialoog te tonen"""
     try:
+        if not SMARTCARD_AVAILABLE:
+            show_eid_not_available()
+            return
+            
         dialog = EIDReaderDialog(parent, patient_management, update_mode, patient_id)
         dialog.show_field_selection_dialog()
         
