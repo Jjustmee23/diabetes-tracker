@@ -245,9 +245,9 @@ class BelgianEIDReader:
             # Selecteer EID applicatie
             self.get_eid_application_info()
             
-            # PIN verificatie indien vereist
-            if pin_code:
-                self.verify_pin(pin_code)
+            # PIN verificatie is NIET nodig voor standaard identiteitsgegevens
+            # Alleen voor beveiligde gegevens zoals certificaten
+            # PIN verificatie overslaan voor basis info
             
             # Lees identiteitsbestand
             identity_data = {}
@@ -601,8 +601,8 @@ class EIDReaderDialog:
         
         instructions = [
             "1. 🔌 Controleer of je kaartlezer aangesloten is",
-            "2. 🆔 Steek je Belgische EID kaart in de lezer",
-            "3. 🔢 Voer je PIN code in wanneer gevraagd",
+            "2. 🆔 Steek je Belgische EID kaart in de lezer", 
+            "3. 📖 Standaard gegevens worden gelezen zonder PIN",
             "4. ⏳ Wacht tot de gegevens uitgelezen zijn"
         ]
         
@@ -617,24 +617,37 @@ class EIDReaderDialog:
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, pady=(20, 0))
         
-        self.read_button = ttk.Button(button_frame, text="🔄 Start Uitleen", 
+        self.read_button = ttk.Button(button_frame, text="📖 Lees EID", 
                                      command=self.begin_card_reading)
         self.read_button.pack(side=tk.LEFT, padx=(0, 10))
         
-        self.demo_button = ttk.Button(button_frame, text="🎭 Demo Mode", 
-                                     command=self.simulate_eid_reading)
-        self.demo_button.pack(side=tk.LEFT, padx=(0, 10))
+        # Optionele PIN knop voor gevorderde functies  
+        self.pin_button = ttk.Button(button_frame, text="🔐 Met PIN (Certificaten)", 
+                                    command=self.begin_card_reading_with_pin)
+        self.pin_button.pack(side=tk.LEFT, padx=(0, 10))
         
         ttk.Button(button_frame, text="❌ Annuleren", 
                   command=self.dialog.destroy).pack(side=tk.LEFT)
     
     def begin_card_reading(self):
         """Begin met kaart uitleen in thread"""
-        self.read_button.config(state='disabled')
+        self.read_button.config(state='disabled') 
+        self.pin_button.config(state='disabled')
         self.progress.start()
         
         # Start in thread om UI responsive te houden
         thread = threading.Thread(target=self.read_card_thread)
+        thread.daemon = True
+        thread.start()
+    
+    def begin_card_reading_with_pin(self):
+        """Begin met kaart uitleen met PIN voor certificaten"""
+        self.read_button.config(state='disabled')
+        self.pin_button.config(state='disabled')
+        self.progress.start()
+        
+        # Start in thread om UI responsive te houden
+        thread = threading.Thread(target=self.read_card_with_pin_thread)
         thread.daemon = True
         thread.start()
     
@@ -667,10 +680,80 @@ class EIDReaderDialog:
             if not connected:
                 raise Exception("Kan niet verbinden met EID kaart")
             
+            self.dialog.after(0, lambda: self.status_label.config(text="📖 Lees EID gegevens..."))
+            
+            # Lees gegevens direct zonder PIN (standaard gegevens zijn openbaar)
+            self.dialog.after(0, self.read_eid_without_pin)
+            
+        except Exception as e:
+            self.dialog.after(0, lambda: self.handle_reading_error(str(e)))
+    
+    def read_card_with_pin_thread(self):
+        """Lees kaart met PIN voor certificaten"""
+        try:
+            # Update status
+            self.dialog.after(0, lambda: self.status_label.config(text="🔍 Zoek naar kaartlezers..."))
+            time.sleep(1)
+            
+            # Zoek kaartlezers
+            readers = self.eid_reader.get_card_readers()
+            if not readers:
+                raise Exception("Geen kaartlezers gevonden")
+            
+            self.dialog.after(0, lambda: self.status_label.config(text="🆔 Wacht op EID kaart..."))
+            
+            # Probeer verbinding te maken
+            connected = False
+            for attempt in range(3):
+                try:
+                    self.eid_reader.connect_to_card(timeout=5)
+                    connected = True
+                    break
+                except Exception as e:
+                    if attempt == 2:
+                        raise e
+                    time.sleep(1)
+            
+            if not connected:
+                raise Exception("Kan niet verbinden met EID kaart")
+            
             self.dialog.after(0, lambda: self.status_label.config(text="🔢 PIN code vereist..."))
             
             # Vraag PIN code
             self.dialog.after(0, self.ask_pin_code)
+            
+        except Exception as e:
+            self.dialog.after(0, lambda: self.handle_reading_error(str(e)))
+    
+    def read_eid_without_pin(self):
+        """Lees EID gegevens zonder PIN (alleen openbare gegevens)"""
+        try:
+            self.progress.start()
+            
+            # Start lezen in thread
+            thread = threading.Thread(target=self.read_public_data_thread)
+            thread.daemon = True
+            thread.start()
+            
+        except Exception as e:
+            self.handle_reading_error(str(e))
+    
+    def read_public_data_thread(self):
+        """Lees openbare EID gegevens in background thread"""
+        try:
+            self.dialog.after(0, lambda: self.status_label.config(text="📖 Lees identiteitsgegevens..."))
+            
+            # Selecteer gewenste velden
+            selected_fields = {field: info for field, info in self.eid_reader.available_fields.items() 
+                             if info['selected']}
+            
+            # Lees EID data zonder PIN
+            eid_data = self.eid_reader.read_full_eid_data(pin_code=None)
+            
+            # Update UI en toon resultaten
+            self.dialog.after(0, lambda: self.progress.stop())
+            self.dialog.after(0, lambda: self.status_label.config(text="✅ EID succesvol uitgelezen"))
+            self.dialog.after(0, lambda: self.show_results(eid_data))
             
         except Exception as e:
             self.dialog.after(0, lambda: self.handle_reading_error(str(e)))
@@ -896,6 +979,7 @@ class EIDReaderDialog:
         """Behandel EID uitleen fouten"""
         self.progress.stop()
         self.read_button.config(state='normal')
+        self.pin_button.config(state='normal')
         self.status_label.config(text=f"❌ Fout: {error_message}")
         
         # Disconnect van kaart
