@@ -446,76 +446,310 @@ class BelgianEIDReader:
         raise Exception("Geen adresfile gevonden")
     
     def generate_generic_card_data(self):
-        """Probeer echte data te lezen met alternatieve methoden"""
-        print("🔍 Probeer alternatieve kaart data extractie...")
+        """Lees echte Belgische eID data met officiële methoden"""
+        print("🇧🇪 Lees Belgische eID kaart met officiële methoden...")
         
-        identity_data = {}
-        address_data = {}
-        
-        # Probeer verschillende APDU methoden om echte data te krijgen
         try:
-            # Probeer andere EID file selecties
-            alternative_apdus = [
-                # Nederlandse EID
-                [0x00, 0xA4, 0x04, 0x0C, 0x0E, 0xA0, 0x00, 0x00, 0x00, 0x77, 0x01, 0x08, 0x00, 0x07, 0x00, 0x00, 0xFE, 0x00, 0x00, 0x01, 0x00],
-                # Duitse EID
-                [0x00, 0xA4, 0x04, 0x0C, 0x0A, 0xE8, 0x28, 0xBD, 0x08, 0x0F, 0xF2, 0x50, 0x4F, 0x54, 0x20],
-                # Europese EID standaard
-                [0x00, 0xA4, 0x04, 0x00, 0x0C, 0xA0, 0x00, 0x00, 0x01, 0x67, 0x45, 0x53, 0x49, 0x47, 0x4E],
-                # Basic card info
-                [0x00, 0xCA, 0x9F, 0x7F, 0x00],
-                # Card serial
-                [0x80, 0xCA, 0x9F, 0x7F, 0x00],
-                # ATR info
-                [0x00, 0xCA, 0x01, 0x00, 0x00]
-            ]
-            
-            for apdu in alternative_apdus:
-                try:
-                    response = self.send_apdu(apdu)
-                    if response and len(response) > 2:
-                        # Parse response voor echte data
-                        data_str = self.parse_card_response(response)
-                        if data_str:
-                            print(f"✅ Gevonden kaart data: {data_str[:50]}...")
-                            # Probeer data te parsen
-                            parsed = self.extract_personal_info(data_str)
-                            if parsed:
-                                identity_data.update(parsed)
-                                break
-                except:
-                    continue
-            
-            # Als nog geen data, probeer kaart ATR info
-            if not identity_data:
-                identity_data = self.get_card_atr_info()
-            
+            # Stap 1: Probeer Belgische eID applicatie te selecteren
+            identity_data, address_data = self.read_belgian_eid_official()
+            if identity_data and len(identity_data) > 2:
+                return identity_data, address_data
+                
         except Exception as e:
-            print(f"⚠️ Alternatieve methoden faalden: {e}")
+            print(f"⚠️ Officiële eID methode gefaald: {e}")
         
-        # Als nog steeds geen data, gebruik minimale fallback
+        try:
+            # Stap 2: Probeer via CLI tools (indien beschikbaar)
+            identity_data, address_data = self.try_eid_cli_reader()
+            if identity_data and len(identity_data) > 2:
+                return identity_data, address_data
+                
+        except Exception as e:
+            print(f"⚠️ CLI methode gefaald: {e}")
+        
+        try:
+            # Stap 3: Probeer directe TLV parsing
+            identity_data, address_data = self.read_eid_tlv_direct()
+            if identity_data and len(identity_data) > 2:
+                return identity_data, address_data
+                
+        except Exception as e:
+            print(f"⚠️ Directe TLV methode gefaald: {e}")
+        
+        # Stap 4: ATR-gebaseerde unieke identifier
+        identity_data = self.get_card_atr_info()
         if not identity_data:
             print("⚠️ Geen kaart data gevonden - gebruik handmatige invoer")
             identity_data = {
-                'card_number': 'ONBEKEND',
+                'card_number': 'HANDMATIG_INVOEREN',
                 'surname': 'NIET_UITGELEZEN',
-                'first_names': 'HANDMATIG_INVOEREN',
+                'first_names': 'HANDMATIG_INVOEREN', 
                 'birth_date': 'DD/MM/YYYY',
                 'sex': 'Onbekend',
                 'nationality': 'Onbekend',
                 'birth_location': 'Onbekend',
-                'national_number': 'NIET_BESCHIKBAAR'
+                'national_number': 'HANDMATIG_INVOEREN'
             }
             
-            address_data = {
-                'street_and_number': 'HANDMATIG_INVOEREN',
-                'zip_code': '0000',
-                'municipality': 'ONBEKEND'
-            }
+        address_data = {
+            'street_and_number': 'HANDMATIG_INVOEREN',
+            'zip_code': '0000',
+            'municipality': 'HANDMATIG_INVOEREN'
+        }
         
         print("✅ Kaart data extraction voltooid")
         return identity_data, address_data
     
+    def read_belgian_eid_official(self):
+        """Lees Belgische eID met officiële BELPIC selectie"""
+        print("🇧🇪 Probeer officiële Belgische eID BELPIC selectie...")
+        
+        try:
+            # Selecteer BELPIC applicatie (officiële Belgische eID)
+            belpic_aid = [0x00, 0xA4, 0x04, 0x00, 0x0C] + [ord(c) for c in "BELPIC"] + [0x20, 0x20, 0x20, 0x20, 0x20]
+            response = self.send_apdu(belpic_aid)
+            
+            if response and len(response) >= 2 and response[-2:] == [0x90, 0x00]:
+                print("✅ BELPIC applicatie geselecteerd")
+                
+                # Lees identiteitsgegevens
+                identity_data = self.read_eid_identity_file()
+                address_data = {}
+                
+                # Probeer adres (vereist mogelijk PIN)
+                try:
+                    address_data = self.read_eid_address_file()
+                except:
+                    print("ℹ️ Adresgegevens niet leesbaar (PIN vereist)")
+                    address_data = {
+                        'street_and_number': 'PIN_VEREIST',
+                        'zip_code': 'PIN_VEREIST',
+                        'municipality': 'PIN_VEREIST'
+                    }
+                
+                return identity_data, address_data
+            else:
+                raise Exception("BELPIC selectie gefaald")
+                
+        except Exception as e:
+            print(f"⚠️ BELPIC methode gefaald: {e}")
+            raise e
+    
+    def try_eid_cli_reader(self):
+        """Probeer eID CLI tools te gebruiken"""
+        print("🖥️ Probeer eID CLI tools...")
+        
+        import subprocess
+        import os
+        import json
+        
+        # Mogelijke eID CLI tools locaties
+        cli_paths = [
+            r"C:\Program Files (x86)\Belgium Identity Card\eID Viewer\eid-viewer-cli.exe",
+            r"C:\Program Files\Belgium Identity Card\eID Viewer\eid-viewer-cli.exe",
+            "eid-viewer-cli",
+            "eid-viewer",
+            "beid-tool"
+        ]
+        
+        for cli_path in cli_paths:
+            try:
+                if os.path.exists(cli_path) or cli_path in ["eid-viewer-cli", "eid-viewer", "beid-tool"]:
+                    print(f"🔍 Probeer: {cli_path}")
+                    
+                    # Voer CLI commando uit
+                    result = subprocess.run([cli_path, "-x"], capture_output=True, text=True, timeout=10)
+                    
+                    if result.returncode == 0 and result.stdout:
+                        print("✅ CLI data ontvangen")
+                        # Parse XML output
+                        identity_data, address_data = self.parse_eid_xml(result.stdout)
+                        return identity_data, address_data
+                        
+            except Exception as e:
+                print(f"⚠️ CLI {cli_path} gefaald: {e}")
+                continue
+        
+        raise Exception("Geen werkende CLI tools gevonden")
+    
+    def read_eid_tlv_direct(self):
+        """Probeer directe TLV parsing van eID bestanden"""
+        print("📋 Probeer directe TLV parsing...")
+        
+        try:
+            # Selecteer Master File
+            mf_select = [0x00, 0xA4, 0x00, 0x0C, 0x02, 0x3F, 0x00]
+            response = self.send_apdu(mf_select)
+            
+            # Selecteer eID Directory File
+            df_select = [0x00, 0xA4, 0x00, 0x0C, 0x02, 0xDF, 0x01]
+            response = self.send_apdu(df_select)
+            
+            # Selecteer Identity File
+            ef_identity = [0x00, 0xA4, 0x00, 0x0C, 0x02, 0x40, 0x31]
+            response = self.send_apdu(ef_identity)
+            
+            if response and len(response) >= 2 and response[-2:] == [0x90, 0x00]:
+                # Lees identity data
+                identity_raw = self.read_binary()
+                identity_data = self.parse_eid_tlv_identity(identity_raw)
+                
+                # Probeer adres
+                address_data = {}
+                try:
+                    ef_address = [0x00, 0xA4, 0x00, 0x0C, 0x02, 0x40, 0x33]
+                    response = self.send_apdu(ef_address)
+                    if response and len(response) >= 2 and response[-2:] == [0x90, 0x00]:
+                        address_raw = self.read_binary()
+                        address_data = self.parse_eid_tlv_address(address_raw)
+                except:
+                    address_data = {
+                        'street_and_number': 'NIET_LEESBAAR',
+                        'zip_code': 'NIET_LEESBAAR', 
+                        'municipality': 'NIET_LEESBAAR'
+                    }
+                
+                return identity_data, address_data
+            else:
+                raise Exception("Kon eID bestanden niet selecteren")
+                
+        except Exception as e:
+            print(f"⚠️ Directe TLV parsing gefaald: {e}")
+            raise e
+    
+    def parse_eid_xml(self, xml_data):
+        """Parse XML output van eID CLI tools"""
+        try:
+            import xml.etree.ElementTree as ET
+            
+            root = ET.fromstring(xml_data)
+            
+            identity_data = {}
+            address_data = {}
+            
+            # Parse identity fields
+            for elem in root.iter():
+                if 'surname' in elem.tag.lower():
+                    identity_data['surname'] = elem.text or 'ONBEKEND'
+                elif 'firstnames' in elem.tag.lower() or 'givenname' in elem.tag.lower():
+                    identity_data['first_names'] = elem.text or 'ONBEKEND'
+                elif 'nationalnumber' in elem.tag.lower():
+                    identity_data['national_number'] = elem.text or 'ONBEKEND'
+                elif 'birthdate' in elem.tag.lower():
+                    identity_data['birth_date'] = elem.text or 'ONBEKEND'
+                elif 'sex' in elem.tag.lower() or 'gender' in elem.tag.lower():
+                    identity_data['sex'] = elem.text or 'ONBEKEND'
+                elif 'nationality' in elem.tag.lower():
+                    identity_data['nationality'] = elem.text or 'ONBEKEND'
+                elif 'cardnumber' in elem.tag.lower():
+                    identity_data['card_number'] = elem.text or 'ONBEKEND'
+                elif 'street' in elem.tag.lower():
+                    address_data['street_and_number'] = elem.text or 'ONBEKEND'
+                elif 'zip' in elem.tag.lower() or 'postal' in elem.tag.lower():
+                    address_data['zip_code'] = elem.text or 'ONBEKEND'
+                elif 'municipality' in elem.tag.lower() or 'city' in elem.tag.lower():
+                    address_data['municipality'] = elem.text or 'ONBEKEND'
+            
+            print(f"✅ XML parsing succesvol: {len(identity_data)} velden gevonden")
+            return identity_data, address_data
+            
+        except Exception as e:
+            print(f"⚠️ XML parsing gefaald: {e}")
+            return {}, {}
+    
+    def parse_eid_tlv_identity(self, raw_data):
+        """Parse TLV gecodeerde identiteitsgegevens"""
+        try:
+            if not raw_data or len(raw_data) < 10:
+                return {}
+            
+            # Basis TLV parsing voor eID
+            identity_data = {}
+            i = 0
+            
+            while i < len(raw_data) - 2:
+                try:
+                    tag = raw_data[i]
+                    length = raw_data[i + 1]
+                    
+                    if i + 2 + length > len(raw_data):
+                        break
+                    
+                    value_bytes = raw_data[i + 2:i + 2 + length]
+                    value = ''.join(chr(b) for b in value_bytes if 32 <= b <= 126).strip()
+                    
+                    # Map eID tags naar velden
+                    if tag == 0x01:  # Card Number
+                        identity_data['card_number'] = value
+                    elif tag == 0x02:  # Chip Number
+                        identity_data['chip_number'] = value
+                    elif tag == 0x06:  # National Number
+                        identity_data['national_number'] = value
+                    elif tag == 0x07:  # Surname
+                        identity_data['surname'] = value
+                    elif tag == 0x08:  # First Names
+                        identity_data['first_names'] = value
+                    elif tag == 0x0B:  # Birth Date
+                        identity_data['birth_date'] = value
+                    elif tag == 0x0C:  # Birth Location
+                        identity_data['birth_location'] = value
+                    elif tag == 0x0D:  # Sex
+                        identity_data['sex'] = value
+                    elif tag == 0x0E:  # Nationality
+                        identity_data['nationality'] = value
+                    
+                    i += 2 + length
+                    
+                except:
+                    i += 1
+            
+            print(f"✅ TLV identity parsing: {len(identity_data)} velden")
+            return identity_data
+            
+        except Exception as e:
+            print(f"⚠️ TLV identity parsing gefaald: {e}")
+            return {}
+    
+    def parse_eid_tlv_address(self, raw_data):
+        """Parse TLV gecodeerde adresgegevens"""
+        try:
+            if not raw_data or len(raw_data) < 10:
+                return {}
+            
+            address_data = {}
+            i = 0
+            
+            while i < len(raw_data) - 2:
+                try:
+                    tag = raw_data[i]
+                    length = raw_data[i + 1]
+                    
+                    if i + 2 + length > len(raw_data):
+                        break
+                    
+                    value_bytes = raw_data[i + 2:i + 2 + length]
+                    value = ''.join(chr(b) for b in value_bytes if 32 <= b <= 126).strip()
+                    
+                    # Map address tags
+                    if tag == 0x01:  # Street and Number
+                        address_data['street_and_number'] = value
+                    elif tag == 0x02:  # Zip Code
+                        address_data['zip_code'] = value
+                    elif tag == 0x03:  # Municipality
+                        address_data['municipality'] = value
+                    
+                    i += 2 + length
+                    
+                except:
+                    i += 1
+            
+            print(f"✅ TLV address parsing: {len(address_data)} velden")
+            return address_data
+            
+        except Exception as e:
+            print(f"⚠️ TLV address parsing gefaald: {e}")
+            return {}
+
     def parse_card_response(self, response):
         """Parse kaart response naar leesbare data"""
         try:
