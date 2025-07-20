@@ -78,12 +78,20 @@ class BelgianEIDReader:
             print(f"Fout bij ophalen kaartlezers: {str(e)}")
             return []
     
-    def connect_to_card(self, timeout=10):
-        """Verbind met EID kaart"""
+    def connect_to_card(self, timeout=30):
+        """Verbind met EID kaart met verbeterde stabiliteit"""
         if not SMARTCARD_AVAILABLE:
             raise Exception("Smartcard libraries niet beschikbaar")
         
         try:
+            # Disconnect eventuele bestaande verbindingen
+            if self.card_connection:
+                try:
+                    self.card_connection.disconnect()
+                except:
+                    pass
+                self.card_connection = None
+            
             # Zoek naar kaartlezers
             card_readers = self.get_card_readers()
             if not card_readers:
@@ -91,38 +99,70 @@ class BelgianEIDReader:
             
             print(f"Gevonden kaartlezers: {[str(reader) for reader in card_readers]}")
             
-            # Probeer verbinding te maken
-            cardtype = AnyCardType()
-            cardrequest = CardRequest(timeout=timeout, cardType=cardtype)
+            # Probeer verbinding per reader
+            for reader in card_readers:
+                # Skip Windows Hello for Business - dat is geen echte smartcard reader
+                if "Windows Hello" in str(reader):
+                    continue
+                    
+                try:
+                    print(f"Probeer verbinding met: {reader}")
+                    
+                    # Maak verbinding met specifieke reader
+                    connection = reader.createConnection()
+                    connection.connect()
+                    
+                    # Test of kaart reageert met basic SELECT
+                    test_apdu = [0x00, 0xA4, 0x04, 0x00, 0x00]
+                    response, sw1, sw2 = connection.transmit(test_apdu)
+                    
+                    # Als we hier komen is verbinding OK
+                    self.card_connection = connection
+                    print(f"✅ Verbonden met EID kaart via {reader}")
+                    return True
+                    
+                except Exception as reader_error:
+                    print(f"Reader {reader} werkt niet: {reader_error}")
+                    continue
             
-            try:
-                cardservice = cardrequest.waitforcard()
-                cardservice.connection.connect()
-                self.card_connection = cardservice.connection
-                print("✅ Verbonden met EID kaart")
-                return True
-                
-            except CardRequestTimeoutException:
-                raise Exception("Timeout: Steek je EID kaart in de lezer")
-            except NoCardException:
-                raise Exception("Geen kaart gevonden: Steek je EID kaart in de lezer")
+            # Als we hier komen heeft geen enkele reader gewerkt
+            raise Exception("Geen werkende kaartverbinding gevonden. Controleer of EID kaart correct in lezer zit.")
             
         except Exception as e:
             print(f"Fout bij verbinden met kaart: {str(e)}")
             raise
     
     def send_apdu(self, apdu):
-        """Stuur APDU commando naar kaart"""
+        """Stuur APDU commando naar kaart met verbeterde error handling"""
         if not self.card_connection:
-            raise Exception("Geen kaartverbinding")
+            raise Exception("Geen kaartverbinding - roep eerst connect_to_card() aan")
         
         try:
+            # Controleer of verbinding nog actief is
             response, sw1, sw2 = self.card_connection.transmit(apdu)
+            
+            # Controleer status codes
             if sw1 == 0x90 and sw2 == 0x00:
                 return response
+            elif sw1 == 0x6A and sw2 == 0x82:
+                raise Exception("Bestand niet gevonden op EID kaart")
+            elif sw1 == 0x69 and sw2 == 0x83:
+                raise Exception("PIN geblokkeerd - te veel foute pogingen")
+            elif sw1 == 0x63 and (sw2 & 0xF0) == 0xC0:
+                remaining = sw2 & 0x0F
+                raise Exception(f"Foute PIN - nog {remaining} pogingen over")
+            elif sw1 == 0x6A and sw2 == 0x86:
+                raise Exception("Verkeerde parameters in APDU commando")
+            elif sw1 == 0x6D and sw2 == 0x00:
+                raise Exception("Instructie niet ondersteund door kaart")
             else:
                 raise Exception(f"APDU fout: SW1={hex(sw1)}, SW2={hex(sw2)}")
+                
+        except CardConnectionException as e:
+            raise Exception(f"Kaartverbinding verloren: {str(e)}")
         except Exception as e:
+            if "Card not connected" in str(e) or "connection" in str(e).lower():
+                raise Exception("Kaartverbinding verloren - probeer opnieuw")
             print(f"APDU fout: {str(e)}")
             raise
     
@@ -146,20 +186,35 @@ class BelgianEIDReader:
             return self.send_apdu(apdu)
     
     def get_eid_application_info(self):
-        """Haal EID applicatie informatie op"""
+        """Selecteer EID applicatie op kaart"""
         try:
-            # Select EID application
-            # AID voor Belgische EID: A000000177504B43532D31
+            print("🔍 Selecteer EID applicatie...")
+            
+            # Probeer eerst Belgische EID AID: A000000177504B43532D31
             eid_aid = [0xA0, 0x00, 0x00, 0x01, 0x77, 0x50, 0x4B, 0x43, 0x53, 0x2D, 0x31]
             apdu = [0x00, 0xA4, 0x04, 0x00, len(eid_aid)] + eid_aid
             
-            response = self.send_apdu(apdu)
-            print("✅ EID applicatie geselecteerd")
-            return True
+            try:
+                response = self.send_apdu(apdu)
+                print("✅ Belgische EID applicatie geselecteerd")
+                return True
+            except Exception as aid_error:
+                print(f"EID AID selectie mislukt: {aid_error}")
+                
+                # Probeer alternatieve methode: direct Master File selectie
+                try:
+                    print("🔄 Probeer Master File selectie...")
+                    mf_apdu = [0x00, 0xA4, 0x00, 0x0C, 0x02, 0x3F, 0x00]
+                    response = self.send_apdu(mf_apdu)
+                    print("✅ Master File geselecteerd")
+                    return True
+                except Exception as mf_error:
+                    print(f"Master File selectie mislukt: {mf_error}")
+                    print("⚠️ Geen EID applicatie gevonden - mogelijk geen Belgische EID kaart")
+                    return False
             
         except Exception as e:
-            print(f"Fout bij selecteren EID applicatie: {str(e)}")
-            # Probeer alternatieve methode
+            print(f"Fout bij EID applicatie selectie: {str(e)}")
             return False
     
     def read_photo(self):
@@ -307,46 +362,49 @@ class BelgianEIDReader:
             return {}
     
     def verify_pin(self, pin_code):
-        """Verifieer PIN code op echte kaart"""
+        """Verifieer PIN code op echte EID kaart"""
         try:
             if not pin_code or len(pin_code) != 4 or not pin_code.isdigit():
                 raise Exception("PIN code moet exact 4 cijfers bevatten")
             
+            print(f"🔐 Verifieer PIN voor EID kaart...")
+            
+            # Controleer verbinding
+            if not self.card_connection:
+                raise Exception("Geen kaartverbinding voor PIN verificatie")
+            
             # APDU voor PIN verificatie op Belgische EID
-            # VERIFY commando (0x00, 0x20, 0x00, 0x01)
+            # VERIFY commando voor EID PIN: CLA=00, INS=20, P1=00, P2=01
             pin_bytes = [int(d) for d in pin_code]
             
-            # Pad PIN naar 8 bytes met 0xFF
-            padded_pin = pin_bytes + [0xFF] * (8 - len(pin_bytes))
+            # EID PIN format: 4 cijfers + 4x 0xFF padding
+            padded_pin = pin_bytes + [0xFF, 0xFF, 0xFF, 0xFF]
             
             apdu = [0x00, 0x20, 0x00, 0x01, 0x08] + padded_pin
             
-            try:
-                response = self.send_apdu(apdu)
-                print("✅ PIN verificatie succesvol")
-                return True
-                
-            except Exception as e:
-                # Check specifieke foutcodes
-                error_msg = str(e)
-                if "6983" in error_msg:
-                    raise Exception("PIN geblokkeerd - te veel foute pogingen")
-                elif "63C" in error_msg:
-                    # Extract remaining attempts from SW2
-                    if "63C2" in error_msg:
-                        raise Exception("Foute PIN - nog 2 pogingen over")
-                    elif "63C1" in error_msg:
-                        raise Exception("Foute PIN - nog 1 poging over")
-                    else:
-                        raise Exception("Foute PIN - beperkt aantal pogingen over")
-                elif "6A86" in error_msg:
-                    raise Exception("Verkeerde PIN lengte")
-                else:
-                    raise Exception(f"PIN verificatie mislukt: {error_msg}")
+            print(f"Verstuur PIN verificatie APDU...")
+            response = self.send_apdu(apdu)
+            print("✅ PIN verificatie succesvol")
+            return True
                 
         except Exception as e:
-            print(f"PIN verificatie fout: {str(e)}")
-            raise
+            error_msg = str(e)
+            print(f"PIN verificatie fout: {error_msg}")
+            
+            # Specifieke PIN fouten worden al door send_apdu afgehandeld
+            # Hier alleen specifieke PIN-gerelateerde messages
+            if "geblokkeerd" in error_msg:
+                raise Exception("❌ PIN geblokkeerd - contacteer gemeente voor deblokkering")
+            elif "pogingen over" in error_msg:
+                raise Exception(f"❌ {error_msg}")
+            elif "Foute PIN" in error_msg:
+                raise Exception(f"❌ {error_msg}")
+            elif "PIN code moet" in error_msg:
+                raise Exception(f"❌ {error_msg}")
+            elif "verbinding" in error_msg.lower():
+                raise Exception("❌ Kaartverbinding verloren tijdens PIN verificatie")
+            else:
+                raise Exception(f"❌ PIN verificatie mislukt: {error_msg}")
     
     def disconnect(self):
         """Verbreek kaartverbinding"""
