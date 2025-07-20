@@ -272,18 +272,21 @@ class BelgianEIDReader:
                 print(f"Fout bij verbreken verbinding: {str(e)}")
 
 class EIDReaderDialog:
-    def __init__(self, parent, patient_management=None):
+    def __init__(self, parent, patient_management=None, update_mode=False, patient_id=None):
         self.parent = parent
         self.patient_management = patient_management
         self.eid_reader = BelgianEIDReader(parent)
         self.dialog = None
         self.pin_attempts = 0
         self.max_pin_attempts = 3
+        self.update_mode = update_mode
+        self.patient_id = patient_id
         
     def show_field_selection_dialog(self):
         """Toon dialoog voor selectie van uit te lezen velden"""
         selection_window = tk.Toplevel(self.parent)
-        selection_window.title("📋 EID Velden Selecteren")
+        title = "🔄 EID Update - Velden Selecteren" if self.update_mode else "📋 EID Velden Selecteren"
+        selection_window.title(title)
         selection_window.geometry("600x700")
         selection_window.transient(self.parent)
         selection_window.grab_set()
@@ -299,10 +302,12 @@ class EIDReaderDialog:
         main_frame.pack(fill=tk.BOTH, expand=True)
         
         # Header
-        ttk.Label(main_frame, text="📋 Selecteer EID Gegevens", 
+        header_text = "🔄 EID Update - Selecteer Gegevens" if self.update_mode else "📋 Selecteer EID Gegevens"
+        ttk.Label(main_frame, text=header_text, 
                  font=('Arial', 16, 'bold')).pack(pady=(0, 20))
         
-        ttk.Label(main_frame, text="Selecteer welke gegevens van de EID kaart uitgelezen moeten worden:", 
+        instruction_text = "Selecteer welke gegevens bijgewerkt moeten worden:" if self.update_mode else "Selecteer welke gegevens van de EID kaart uitgelezen moeten worden:"
+        ttk.Label(main_frame, text=instruction_text, 
                  font=('Arial', 11)).pack(pady=(0, 20))
         
         # Scrollable frame voor checkboxes
@@ -657,17 +662,25 @@ class EIDReaderDialog:
             """Sla gegevens op in patiënten profiel"""
             try:
                 if self.patient_management:
-                    # Map EID gegevens naar patient profiel velden
-                    patient_data = self.map_eid_to_patient_data(eid_data)
-                    
-                    # Voeg patiënt toe
-                    success = self.patient_management.add_patient_from_eid(patient_data)
-                    
-                    if success:
-                        messagebox.showinfo("Succes", "Patiënt succesvol toegevoegd via EID!")
-                        results_window.destroy()
+                    if self.update_mode and self.patient_id:
+                        # Update bestaande patiënt
+                        success = self.patient_management.update_existing_patient_from_eid(self.patient_id, eid_data)
+                        
+                        if success:
+                            messagebox.showinfo("Update Succesvol", "Patiënt succesvol bijgewerkt via EID!")
+                            results_window.destroy()
+                        else:
+                            messagebox.showinfo("Update Geannuleerd", "Update geannuleerd door gebruiker.")
                     else:
-                        messagebox.showerror("Fout", "Kon patiënt niet toevoegen.")
+                        # Voeg nieuwe patiënt toe
+                        patient_data = self.map_eid_to_patient_data(eid_data)
+                        success = self.patient_management.add_patient_from_eid(patient_data)
+                        
+                        if success:
+                            messagebox.showinfo("Succes", "Patiënt succesvol toegevoegd via EID!")
+                            results_window.destroy()
+                        else:
+                            messagebox.showerror("Fout", "Kon patiënt niet toevoegen.")
                 else:
                     messagebox.showerror("Fout", "Patiënten management niet beschikbaar.")
                     
@@ -695,7 +708,9 @@ class EIDReaderDialog:
             except Exception as e:
                 messagebox.showerror("Export Fout", f"Kon niet exporteren: {str(e)}")
         
-        ttk.Button(button_frame, text="💾 Opslaan als Patiënt", 
+        # Aanpassing knop tekst voor update mode
+        save_button_text = "🔄 Bijwerken Patiënt" if self.update_mode else "💾 Opslaan als Patiënt"
+        ttk.Button(button_frame, text=save_button_text, 
                   command=save_to_patient_profile).pack(side=tk.LEFT, padx=(0, 10))
         
         ttk.Button(button_frame, text="📤 Exporteren", 
@@ -739,10 +754,10 @@ class EIDReaderDialog:
         
         messagebox.showerror("EID Fout", f"Kon EID niet uitlezen:\n\n{error_message}")
 
-def show_eid_reader_dialog(parent, patient_management=None):
+def show_eid_reader_dialog(parent, patient_management=None, update_mode=False, patient_id=None):
     """Hoofdfunctie om EID reader dialoog te tonen"""
     try:
-        dialog = EIDReaderDialog(parent, patient_management)
+        dialog = EIDReaderDialog(parent, patient_management, update_mode, patient_id)
         dialog.show_field_selection_dialog()
         
     except Exception as e:

@@ -399,9 +399,22 @@ class PatientProfile:
             if patient_data['notes']:
                 ttk.Label(info_frame, text=f"Opmerkingen: {patient_data['notes']}").pack(anchor=tk.W, pady=2)
             
-            # Bewerken knop
-            ttk.Button(info_frame, text="Bewerken", 
-                      command=lambda: self.edit_patient_data(patient_data)).pack(pady=20)
+            # Bewerken knoppen
+            edit_buttons_frame = ttk.Frame(info_frame)
+            edit_buttons_frame.pack(pady=20)
+            
+            ttk.Button(edit_buttons_frame, text="✏️ Bewerken", 
+                      command=lambda: self.edit_patient_data(patient_data)).pack(side=tk.LEFT, padx=(0, 15))
+            
+            # EID bewerken knop (alleen als beschikbaar)
+            if EID_READER_AVAILABLE:
+                ttk.Button(edit_buttons_frame, text="🆔 Bewerken met EID", 
+                          command=lambda: self.update_patient_via_eid(patient_data['id']), 
+                          style='info.TButton').pack(side=tk.LEFT)
+            else:
+                ttk.Button(edit_buttons_frame, text="🆔 EID (Niet Beschikbaar)", 
+                          command=self.show_eid_not_available,
+                          state='disabled').pack(side=tk.LEFT)
         else:
             # Nieuwe patiënt toevoegen
             ttk.Label(info_frame, text="Nog geen patiënt profiel aangemaakt", 
@@ -609,6 +622,237 @@ class PatientProfile:
         except Exception as e:
             messagebox.showerror("Update Fout", f"Kon patiënt niet bijwerken: {str(e)}")
             return False
+    
+    def update_patient_via_eid(self, patient_id):
+        """Update bestaande patiënt via EID kaart"""
+        try:
+            if not EID_READER_AVAILABLE:
+                self.show_eid_not_available()
+                return
+            
+            # Bewaar patient_id voor later gebruik
+            self.updating_patient_id = patient_id
+            
+            # Start EID reader dialoog met update context
+            show_eid_reader_dialog(self.patient_window, self, update_mode=True, patient_id=patient_id)
+            
+        except Exception as e:
+            messagebox.showerror("EID Update Fout", f"Kon EID update niet starten: {str(e)}")
+    
+    def update_existing_patient_from_eid(self, patient_id, eid_data):
+        """Update bestaande patiënt met EID gegevens"""
+        try:
+            # Vraag gebruiker welke velden bijgewerkt moeten worden
+            update_fields = self.ask_which_fields_to_update(eid_data)
+            
+            if not update_fields:
+                return False  # Gebruiker heeft geannuleerd
+            
+            # Bouw update query op basis van geselecteerde velden
+            update_parts = []
+            values = []
+            
+            field_mappings = {
+                'name': ('first_name', 'last_name'),
+                'birth_info': ('birth_date', 'birth_place'),
+                'nationality': ('nationality',),
+                'gender': ('gender',),
+                'address': ('address', 'postal_code', 'city'),
+                'eid_card': ('card_number', 'card_validity', 'national_number'),
+                'photo': ('photo_base64',),
+                'eid_metadata': ('eid_read_date',)
+            }
+            
+            for field_category in update_fields:
+                if field_category in field_mappings:
+                    for db_field in field_mappings[field_category]:
+                        if db_field == 'first_name':
+                            first_name = eid_data.get('first_name', '').split()[0] if eid_data.get('first_name') else ''
+                            update_parts.append(f"{db_field} = ?")
+                            values.append(first_name)
+                        elif db_field == 'last_name':
+                            update_parts.append(f"{db_field} = ?")
+                            values.append(eid_data.get('last_name', ''))
+                        elif db_field == 'birth_date':
+                            update_parts.append(f"{db_field} = ?")
+                            values.append(eid_data.get('birth_date', ''))
+                        elif db_field == 'birth_place':
+                            update_parts.append(f"{db_field} = ?")
+                            values.append(eid_data.get('birth_place', ''))
+                        elif db_field == 'nationality':
+                            update_parts.append(f"{db_field} = ?")
+                            values.append(eid_data.get('nationality', ''))
+                        elif db_field == 'gender':
+                            gender = 'Man' if eid_data.get('gender') == 'M' else 'Vrouw' if eid_data.get('gender') == 'V' else 'Onbekend'
+                            update_parts.append(f"{db_field} = ?")
+                            values.append(gender)
+                        elif db_field == 'address':
+                            update_parts.append(f"{db_field} = ?")
+                            values.append(eid_data.get('address', ''))
+                        elif db_field == 'postal_code':
+                            update_parts.append(f"{db_field} = ?")
+                            values.append(eid_data.get('postal_code', ''))
+                        elif db_field == 'city':
+                            update_parts.append(f"{db_field} = ?")
+                            values.append(eid_data.get('city', ''))
+                        elif db_field == 'card_number':
+                            update_parts.append(f"{db_field} = ?")
+                            values.append(eid_data.get('card_number', ''))
+                        elif db_field == 'card_validity':
+                            update_parts.append(f"{db_field} = ?")
+                            values.append(eid_data.get('card_validity', ''))
+                        elif db_field == 'national_number':
+                            update_parts.append(f"{db_field} = ?")
+                            values.append(eid_data.get('national_number', ''))
+                        elif db_field == 'photo_base64':
+                            update_parts.append(f"{db_field} = ?")
+                            values.append(eid_data.get('photo_base64', ''))
+                        elif db_field == 'eid_read_date':
+                            update_parts.append(f"{db_field} = ?")
+                            values.append(eid_data.get('eid_read_date', ''))
+            
+            # Voeg altijd EID update timestamp toe aan notes
+            update_parts.append("notes = COALESCE(notes, '') || ?")
+            values.append(f"\n\nEID bijgewerkt op {eid_data.get('eid_read_date', '')} - Velden: {', '.join(update_fields)}")
+            
+            # Voeg patient_id toe voor WHERE clause
+            values.append(patient_id)
+            
+            if update_parts:
+                query = f"UPDATE patients SET {', '.join(update_parts)} WHERE id = ?"
+                
+                self.patient_cursor.execute(query, values)
+                self.patient_conn.commit()
+                
+                # Refresh de GUI
+                if self.patient_window:
+                    self.patient_window.destroy()
+                    self.create_patient_window()
+                
+                messagebox.showinfo("Update Succesvol", 
+                                  f"Patiënt gegevens succesvol bijgewerkt met EID informatie!\n\n"
+                                  f"Bijgewerkte velden: {', '.join(update_fields)}")
+                
+                return True
+            else:
+                messagebox.showinfo("Geen Updates", "Geen velden geselecteerd voor update.")
+                return False
+                
+        except Exception as e:
+            messagebox.showerror("Update Fout", f"Kon patiënt niet bijwerken: {str(e)}")
+            return False
+    
+    def ask_which_fields_to_update(self, eid_data):
+        """Vraag gebruiker welke velden bijgewerkt moeten worden"""
+        selection_window = tk.Toplevel(self.patient_window)
+        selection_window.title("🔄 Selecteer Velden voor Update")
+        selection_window.geometry("600x500")
+        selection_window.transient(self.patient_window)
+        selection_window.grab_set()
+        
+        # Centreren
+        selection_window.geometry("+%d+%d" % (
+            self.patient_window.winfo_rootx() + 100,
+            self.patient_window.winfo_rooty() + 100
+        ))
+        
+        # Main frame
+        main_frame = ttk.Frame(selection_window, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Header
+        ttk.Label(main_frame, text="🔄 EID Update - Selecteer Velden", 
+                 font=('Arial', 16, 'bold')).pack(pady=(0, 20))
+        
+        ttk.Label(main_frame, text="Selecteer welke gegevens bijgewerkt moeten worden met EID informatie:", 
+                 font=('Arial', 11)).pack(pady=(0, 20))
+        
+        # Checkboxes voor verschillende categorieën
+        self.update_field_vars = {}
+        
+        # Veld categorieën met beschrijvingen
+        field_categories = [
+            ('name', '👤 Naam Gegevens', f"Voornaam: {eid_data.get('first_name', 'N/A')}\nAchternaam: {eid_data.get('last_name', 'N/A')}"),
+            ('birth_info', '📅 Geboorte Informatie', f"Geboortedatum: {eid_data.get('birth_date', 'N/A')}\nGeboorteplaats: {eid_data.get('birth_place', 'N/A')}"),
+            ('nationality', '🌍 Nationaliteit', f"Nationaliteit: {eid_data.get('nationality', 'N/A')}"),
+            ('gender', '⚥ Geslacht', f"Geslacht: {eid_data.get('gender', 'N/A')}"),
+            ('address', '📍 Adres Gegevens', f"Adres: {eid_data.get('address', 'N/A')}\nPostcode: {eid_data.get('postal_code', 'N/A')}\nGemeente: {eid_data.get('city', 'N/A')}"),
+            ('eid_card', '🆔 EID Kaart Info', f"Kaartnummer: {eid_data.get('card_number', 'N/A')}\nGeldigheid: {eid_data.get('card_validity', 'N/A')}\nRijksnummer: {eid_data.get('national_number', 'N/A')}"),
+            ('photo', '📷 Pasfoto', "Pasfoto van EID kaart"),
+            ('eid_metadata', '📋 EID Metadata', f"Uitgelezen op: {eid_data.get('eid_read_date', 'N/A')}")
+        ]
+        
+        # Scrollable frame
+        canvas = tk.Canvas(main_frame)
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        for field_key, field_name, field_preview in field_categories:
+            var = tk.BooleanVar(value=True)  # Standaard alles geselecteerd
+            self.update_field_vars[field_key] = var
+            
+            # Frame voor elke categorie
+            cat_frame = ttk.LabelFrame(scrollable_frame, text=field_name, padding="10")
+            cat_frame.pack(fill=tk.X, pady=5, padx=10)
+            
+            # Checkbox
+            ttk.Checkbutton(cat_frame, text="Bijwerken", variable=var).pack(anchor=tk.W)
+            
+            # Preview van EID gegevens
+            ttk.Label(cat_frame, text=field_preview, font=('Arial', 9), 
+                     foreground='gray').pack(anchor=tk.W, padx=(20, 0))
+        
+        canvas.pack(side="left", fill="both", expand=True, pady=(0, 20))
+        scrollbar.pack(side="right", fill="y", pady=(0, 20))
+        
+        # Resultaat variabele
+        self.update_selection_result = None
+        
+        # Knoppen
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(20, 0))
+        
+        def select_all():
+            for var in self.update_field_vars.values():
+                var.set(True)
+        
+        def select_none():
+            for var in self.update_field_vars.values():
+                var.set(False)
+        
+        def confirm_selection():
+            selected_fields = [field for field, var in self.update_field_vars.items() if var.get()]
+            self.update_selection_result = selected_fields
+            selection_window.destroy()
+        
+        def cancel_selection():
+            self.update_selection_result = None
+            selection_window.destroy()
+        
+        ttk.Button(button_frame, text="✅ Alles Selecteren", 
+                  command=select_all).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(button_frame, text="❌ Niets Selecteren", 
+                  command=select_none).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(button_frame, text="🔄 Bijwerken", 
+                  command=confirm_selection).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(button_frame, text="🚫 Annuleren", 
+                  command=cancel_selection).pack(side=tk.LEFT)
+        
+        # Wacht tot window gesloten is
+        selection_window.wait_window()
+        
+        return self.update_selection_result
         
     def get_patient_data(self):
         """Haal patiënt data op (voor 1 patiënt)"""
