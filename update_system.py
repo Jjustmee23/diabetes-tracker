@@ -14,7 +14,7 @@ from datetime import datetime
 class UpdateSystem:
     def __init__(self, root):
         self.root = root
-        self.current_version = "1.2.8"
+        self.current_version = "1.2.9"
         self.github_repo = "Jjustmee23/diabetes-tracker"
         self.github_api_url = f"https://api.github.com/repos/{self.github_repo}/releases"
         
@@ -360,14 +360,7 @@ class UpdateSystem:
         
         def start_update():
             update_window.destroy()
-            import webbrowser
-            webbrowser.open(update_info['release_url'])
-            messagebox.showinfo(
-                "🔄 Update", 
-                f"Update naar versie {update_info['version']} wordt gestart...\n\n"
-                "De GitHub releases pagina wordt geopend.\n"
-                "Download en installeer de nieuwe versie."
-            )
+            self.perform_automatic_update(update_info)
         
         def download_direct():
             if update_info['download_url']:
@@ -453,4 +446,185 @@ class UpdateSystem:
                   command=lambda: self.check_for_updates(True)).pack(side=tk.LEFT, padx=(0, 10))
         
         ttk.Button(button_frame, text="❌ Annuleren", 
-                  command=settings_window.destroy).pack(side=tk.LEFT) 
+                  command=settings_window.destroy).pack(side=tk.LEFT)
+    
+    def perform_automatic_update(self, update_info):
+        """Voer automatische update uit"""
+        try:
+            # Toon progress window
+            progress_window = tk.Toplevel(self.root)
+            progress_window.title("🔄 Automatische Update")
+            progress_window.geometry("500x300")
+            progress_window.transient(self.root)
+            progress_window.grab_set()
+            
+            # Centreren
+            progress_window.geometry("+%d+%d" % (
+                self.root.winfo_rootx() + 200,
+                self.root.winfo_rooty() + 200
+            ))
+            
+            # Content
+            main_frame = ttk.Frame(progress_window, padding="20")
+            main_frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Header
+            ttk.Label(main_frame, text="🔄 Automatische Update", 
+                     font=('Arial', 16, 'bold')).pack(pady=(0, 20))
+            
+            ttk.Label(main_frame, text=f"Update naar versie {update_info['version']}", 
+                     font=('Arial', 12)).pack(pady=(0, 20))
+            
+            # Progress bar
+            progress_var = tk.StringVar(value="Voorbereiden...")
+            progress_label = ttk.Label(main_frame, textvariable=progress_var)
+            progress_label.pack(pady=(0, 10))
+            
+            progress_bar = ttk.Progressbar(main_frame, mode='indeterminate')
+            progress_bar.pack(fill=tk.X, pady=(0, 20))
+            progress_bar.start()
+            
+            # Status text
+            status_text = tk.Text(main_frame, height=8, wrap=tk.WORD)
+            status_text.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
+            
+            def update_status(message):
+                status_text.insert(tk.END, f"• {message}\n")
+                status_text.see(tk.END)
+                progress_window.update()
+            
+            def download_and_install():
+                try:
+                    update_status("Start automatische update...")
+                    
+                    if not update_info['download_url']:
+                        update_status("❌ Geen directe download beschikbaar")
+                        update_status("Ga naar GitHub om handmatig te downloaden")
+                        progress_window.after(2000, progress_window.destroy)
+                        return
+                    
+                    # Download de nieuwe versie
+                    update_status("📥 Download nieuwe versie...")
+                    progress_var.set("Downloaden...")
+                    
+                    response = requests.get(update_info['download_url'], stream=True, timeout=30)
+                    response.raise_for_status()
+                    
+                    # Bepaal download locatie
+                    downloads_dir = os.path.expanduser("~/Downloads")
+                    if not os.path.exists(downloads_dir):
+                        downloads_dir = os.getcwd()
+                    
+                    filename = f"Diabetes_Tracker_Update_{update_info['version']}.zip"
+                    filepath = os.path.join(downloads_dir, filename)
+                    
+                    # Download bestand
+                    total_size = int(response.headers.get('content-length', 0))
+                    downloaded = 0
+                    
+                    with open(filepath, 'wb') as f:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                                downloaded += len(chunk)
+                                if total_size > 0:
+                                    progress = (downloaded / total_size) * 100
+                                    progress_var.set(f"Downloaden... {progress:.1f}%")
+                    
+                    update_status(f"✅ Download voltooid: {filename}")
+                    
+                    # Extract en installeer
+                    update_status("📦 Extract bestanden...")
+                    progress_var.set("Installeren...")
+                    
+                    import zipfile
+                    import shutil
+                    
+                    # Maak backup van huidige versie
+                    backup_dir = os.path.join(os.getcwd(), "backup_current_version")
+                    if os.path.exists(backup_dir):
+                        shutil.rmtree(backup_dir)
+                    os.makedirs(backup_dir)
+                    
+                    # Backup belangrijke bestanden
+                    important_files = ['diabetes_tracker.py', 'patient_management.py', 'update_system.py']
+                    for file in important_files:
+                        if os.path.exists(file):
+                            shutil.copy2(file, backup_dir)
+                    
+                    update_status("💾 Backup gemaakt van huidige versie")
+                    
+                    # Extract nieuwe versie
+                    extract_dir = os.path.join(downloads_dir, f"Diabetes_Tracker_{update_info['version']}")
+                    if os.path.exists(extract_dir):
+                        shutil.rmtree(extract_dir)
+                    
+                    with zipfile.ZipFile(filepath, 'r') as zip_ref:
+                        zip_ref.extractall(extract_dir)
+                    
+                    update_status("📁 Bestanden geëxtract")
+                    
+                    # Kopieer nieuwe bestanden
+                    for root, dirs, files in os.walk(extract_dir):
+                        for file in files:
+                            if file.endswith('.py') or file.endswith('.txt') or file.endswith('.md'):
+                                src_path = os.path.join(root, file)
+                                dst_path = os.path.join(os.getcwd(), file)
+                                shutil.copy2(src_path, dst_path)
+                                update_status(f"📄 Bijgewerkt: {file}")
+                    
+                    # Kopieer templates directory
+                    templates_src = os.path.join(extract_dir, "templates")
+                    templates_dst = os.path.join(os.getcwd(), "templates")
+                    if os.path.exists(templates_src):
+                        if os.path.exists(templates_dst):
+                            shutil.rmtree(templates_dst)
+                        shutil.copytree(templates_src, templates_dst)
+                        update_status("📁 Templates bijgewerkt")
+                    
+                    # Cleanup
+                    try:
+                        os.remove(filepath)
+                        shutil.rmtree(extract_dir)
+                        update_status("🧹 Tijdelijke bestanden opgeruimd")
+                    except:
+                        pass
+                    
+                    update_status("✅ Update succesvol voltooid!")
+                    progress_var.set("Update voltooid!")
+                    
+                    # Toon succes bericht
+                    progress_window.after(2000, lambda: self.show_update_success(update_info['version']))
+                    
+                except Exception as e:
+                    update_status(f"❌ Fout tijdens update: {str(e)}")
+                    progress_var.set("Update mislukt")
+                    progress_window.after(3000, progress_window.destroy)
+            
+            # Start update in thread
+            import threading
+            update_thread = threading.Thread(target=download_and_install)
+            update_thread.daemon = True
+            update_thread.start()
+            
+        except Exception as e:
+            messagebox.showerror("Update Fout", f"Kon automatische update niet starten: {str(e)}")
+    
+    def show_update_success(self, new_version):
+        """Toon succes bericht na update"""
+        result = messagebox.askyesno(
+            "✅ Update Succesvol", 
+            f"De applicatie is succesvol bijgewerkt naar versie {new_version}!\n\n"
+            "De applicatie moet opnieuw worden gestart om de wijzigingen toe te passen.\n\n"
+            "Wil je de applicatie nu opnieuw starten?"
+        )
+        
+        if result:
+            # Herstart de applicatie
+            python = sys.executable
+            os.execl(python, python, *sys.argv)
+        else:
+            messagebox.showinfo(
+                "Herstart", 
+                "Start de applicatie handmatig opnieuw om de update toe te passen."
+            ) 
