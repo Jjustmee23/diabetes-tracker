@@ -14,7 +14,7 @@ from datetime import datetime
 class UpdateSystem:
     def __init__(self, root):
         self.root = root
-        self.current_version = "1.2.9"
+        self.current_version = "1.3.0"
         self.github_repo = "Jjustmee23/diabetes-tracker"
         self.github_api_url = f"https://api.github.com/repos/{self.github_repo}/releases"
         

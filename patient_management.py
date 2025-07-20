@@ -7,6 +7,14 @@ import json
 from tkcalendar import DateEntry
 import ttkbootstrap as tb
 
+# EID Reader import (fallback als niet beschikbaar)
+try:
+    from eid_reader import show_eid_reader_dialog
+    EID_READER_AVAILABLE = True
+except ImportError:
+    EID_READER_AVAILABLE = False
+    print("⚠️ EID Reader niet beschikbaar")
+
 class PatientProfile:
     def __init__(self, parent):
         self.parent = parent
@@ -39,7 +47,7 @@ class PatientProfile:
         self.patient_conn = sqlite3.connect('patient_data.db')
         self.patient_cursor = self.patient_conn.cursor()
         
-        # Patiënten tabel
+        # Patiënten tabel (uitgebreid voor EID gegevens)
         self.patient_cursor.execute('''
             CREATE TABLE IF NOT EXISTS patients (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,7 +62,19 @@ class PatientProfile:
                 email TEXT,
                 emergency_contact TEXT,
                 notes TEXT,
-                created_date TEXT
+                created_date TEXT,
+                -- EID specifieke velden
+                national_number TEXT,
+                nationality TEXT,
+                address TEXT,
+                postal_code TEXT,
+                city TEXT,
+                birth_place TEXT,
+                gender TEXT,
+                card_number TEXT,
+                card_validity TEXT,
+                eid_read_date TEXT,
+                photo_base64 TEXT
             )
         ''')
         
@@ -386,8 +406,23 @@ class PatientProfile:
             # Nieuwe patiënt toevoegen
             ttk.Label(info_frame, text="Nog geen patiënt profiel aangemaakt", 
                      font=('Arial', 12, 'bold')).pack(pady=20)
-            ttk.Button(info_frame, text="Patiënt Toevoegen", 
-                      command=self.add_patient).pack(pady=10)
+            
+            # Knoppen frame
+            buttons_frame = ttk.Frame(info_frame)
+            buttons_frame.pack(pady=20)
+            
+            ttk.Button(buttons_frame, text="Patiënt Toevoegen", 
+                      command=self.add_patient).pack(side=tk.LEFT, padx=(0, 15))
+            
+            # EID knop (alleen als beschikbaar)
+            if EID_READER_AVAILABLE:
+                ttk.Button(buttons_frame, text="🆔 Toevoegen via EID", 
+                          command=self.add_patient_via_eid, 
+                          style='info.TButton').pack(side=tk.LEFT)
+            else:
+                ttk.Button(buttons_frame, text="🆔 EID (Niet Beschikbaar)", 
+                          command=self.show_eid_not_available,
+                          state='disabled').pack(side=tk.LEFT)
         
         # Tab 2: Medicatie Beheer
         medication_frame = ttk.Frame(notebook)
@@ -418,6 +453,162 @@ class PatientProfile:
         ttk.Button(med_buttons, text="Bewerken", command=self.edit_patient_medication_modern).pack(side=tk.LEFT, padx=(0, 15))
         ttk.Button(med_buttons, text="Schema Bekijken", command=self.view_schedule).pack(side=tk.LEFT, padx=(0, 15))
         self.load_patient_medications_modern()
+    
+    def add_patient_via_eid(self):
+        """Voeg patiënt toe via EID kaart"""
+        try:
+            if not EID_READER_AVAILABLE:
+                self.show_eid_not_available()
+                return
+            
+            # Start EID reader dialoog
+            show_eid_reader_dialog(self.patient_window, self)
+            
+        except Exception as e:
+            messagebox.showerror("EID Fout", f"Kon EID reader niet starten: {str(e)}")
+    
+    def show_eid_not_available(self):
+        """Toon melding dat EID niet beschikbaar is"""
+        messagebox.showinfo(
+            "EID Niet Beschikbaar", 
+            "EID card reader functionaliteit is niet beschikbaar.\n\n"
+            "Om EID kaarten te kunnen uitlezen, moeten de volgende\n"
+            "bibliotheken geïnstalleerd worden:\n"
+            "• pyscard\n"
+            "• smartcard\n"
+            "• cryptography\n\n"
+            "Installeer deze via: pip install pyscard smartcard cryptography"
+        )
+    
+    def add_patient_from_eid(self, eid_data):
+        """Voeg patiënt toe vanuit EID gegevens"""
+        try:
+            # Maap EID gegevens naar database velden
+            patient_data = {
+                'first_name': eid_data.get('first_name', ''),
+                'last_name': eid_data.get('last_name', ''),
+                'rijksnummer': eid_data.get('national_number', ''),
+                'birth_date': eid_data.get('birth_date', ''),
+                'phone': '',  # Niet beschikbaar op EID
+                'email': '',  # Niet beschikbaar op EID
+                'emergency_contact': '',  # Niet beschikbaar op EID
+                'blood_group': '',  # Niet beschikbaar op EID
+                'weight': None,  # Niet beschikbaar op EID
+                'height': None,  # Niet beschikbaar op EID
+                'notes': f"Toegevoegd via EID op {eid_data.get('eid_read_date', '')}",
+                'created_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                # EID specifieke velden
+                'national_number': eid_data.get('national_number', ''),
+                'nationality': eid_data.get('nationality', ''),
+                'address': eid_data.get('address', ''),
+                'postal_code': eid_data.get('postal_code', ''),
+                'city': eid_data.get('city', ''),
+                'birth_place': eid_data.get('birth_place', ''),
+                'gender': eid_data.get('gender', ''),
+                'card_number': eid_data.get('card_number', ''),
+                'card_validity': eid_data.get('card_validity', ''),
+                'eid_read_date': eid_data.get('eid_read_date', ''),
+                'photo_base64': eid_data.get('photo_base64', '')
+            }
+            
+            # Controleer of patiënt al bestaat
+            self.patient_cursor.execute('''
+                SELECT id FROM patients WHERE rijksnummer = ? OR national_number = ?
+            ''', (patient_data['rijksnummer'], patient_data['national_number']))
+            
+            existing_patient = self.patient_cursor.fetchone()
+            
+            if existing_patient:
+                # Vraag of gebruiker wil updaten
+                result = messagebox.askyesno(
+                    "Patiënt Bestaat Al", 
+                    f"Een patiënt met dit rijksnummer bestaat al.\n\n"
+                    f"Wil je de gegevens bijwerken met de EID informatie?"
+                )
+                
+                if result:
+                    return self.update_patient_with_eid(existing_patient[0], eid_data)
+                else:
+                    return False
+            
+            # Voeg nieuwe patiënt toe
+            self.patient_cursor.execute('''
+                INSERT INTO patients (
+                    first_name, last_name, rijksnummer, birth_date, phone, email, 
+                    emergency_contact, blood_group, weight, height, notes, created_date,
+                    national_number, nationality, address, postal_code, city, 
+                    birth_place, gender, card_number, card_validity, eid_read_date, photo_base64
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                patient_data['first_name'], patient_data['last_name'], patient_data['rijksnummer'],
+                patient_data['birth_date'], patient_data['phone'], patient_data['email'],
+                patient_data['emergency_contact'], patient_data['blood_group'], patient_data['weight'],
+                patient_data['height'], patient_data['notes'], patient_data['created_date'],
+                patient_data['national_number'], patient_data['nationality'], patient_data['address'],
+                patient_data['postal_code'], patient_data['city'], patient_data['birth_place'],
+                patient_data['gender'], patient_data['card_number'], patient_data['card_validity'],
+                patient_data['eid_read_date'], patient_data['photo_base64']
+            ))
+            
+            self.patient_conn.commit()
+            
+            # Refresh de GUI
+            if self.patient_window:
+                self.patient_window.destroy()
+                self.create_patient_window()
+            
+            messagebox.showinfo("Succes", f"Patiënt {patient_data['first_name']} {patient_data['last_name']} succesvol toegevoegd via EID!")
+            
+            return True
+            
+        except sqlite3.IntegrityError as e:
+            messagebox.showerror("Database Fout", f"Patiënt bestaat al of database fout: {str(e)}")
+            return False
+        except Exception as e:
+            messagebox.showerror("Fout", f"Kon patiënt niet toevoegen: {str(e)}")
+            return False
+    
+    def update_patient_with_eid(self, patient_id, eid_data):
+        """Update bestaande patiënt met EID gegevens"""
+        try:
+            # Update patiënt met EID gegevens
+            self.patient_cursor.execute('''
+                UPDATE patients SET 
+                    national_number = ?, nationality = ?, address = ?, postal_code = ?, 
+                    city = ?, birth_place = ?, gender = ?, card_number = ?, 
+                    card_validity = ?, eid_read_date = ?, photo_base64 = ?,
+                    notes = COALESCE(notes, '') || ? 
+                WHERE id = ?
+            ''', (
+                eid_data.get('national_number', ''),
+                eid_data.get('nationality', ''),
+                eid_data.get('address', ''),
+                eid_data.get('postal_code', ''),
+                eid_data.get('city', ''),
+                eid_data.get('birth_place', ''),
+                eid_data.get('gender', ''),
+                eid_data.get('card_number', ''),
+                eid_data.get('card_validity', ''),
+                eid_data.get('eid_read_date', ''),
+                eid_data.get('photo_base64', ''),
+                f"\n\nEID bijgewerkt op {eid_data.get('eid_read_date', '')}",
+                patient_id
+            ))
+            
+            self.patient_conn.commit()
+            
+            # Refresh de GUI
+            if self.patient_window:
+                self.patient_window.destroy()
+                self.create_patient_window()
+            
+            messagebox.showinfo("Succes", "Patiënt gegevens succesvol bijgewerkt met EID informatie!")
+            
+            return True
+            
+        except Exception as e:
+            messagebox.showerror("Update Fout", f"Kon patiënt niet bijwerken: {str(e)}")
+            return False
         
     def get_patient_data(self):
         """Haal patiënt data op (voor 1 patiënt)"""
