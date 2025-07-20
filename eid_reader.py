@@ -741,12 +741,8 @@ class EIDReaderDialog:
                   command=self.dialog.destroy).pack(side=tk.LEFT)
     
     def begin_card_reading(self):
-        """Begin met kaart uitleen in thread"""
-        self.read_button.config(state='disabled') 
-        self.pin_button.config(state='disabled')
-        self.progress.start()
-        
-        # Start in thread om UI responsive te houden
+        """Begin met kaart uitleen direct zonder dialoog"""
+        # Start direct zonder UI dialoog
         thread = threading.Thread(target=self.read_card_thread)
         thread.daemon = True
         thread.start()
@@ -763,18 +759,12 @@ class EIDReaderDialog:
         thread.start()
     
     def read_card_thread(self):
-        """Lees kaart in background thread"""
+        """Lees kaart direct zonder UI feedback"""
         try:
-            # Update status
-            self.dialog.after(0, lambda: self.status_label.config(text="🔍 Zoek naar kaartlezers..."))
-            time.sleep(1)
-            
             # Zoek kaartlezers
             readers = self.eid_reader.get_card_readers()
             if not readers:
                 raise Exception("Geen kaartlezers gevonden")
-            
-            self.dialog.after(0, lambda: self.status_label.config(text="🆔 Wacht op EID kaart..."))
             
             # Probeer verbinding te maken
             connected = False
@@ -791,13 +781,27 @@ class EIDReaderDialog:
             if not connected:
                 raise Exception("Kan niet verbinden met EID kaart")
             
-            self.dialog.after(0, lambda: self.status_label.config(text="📖 Lees EID gegevens..."))
-            
-            # Lees gegevens direct zonder PIN (standaard gegevens zijn openbaar)
-            self.dialog.after(0, self.read_eid_without_pin)
+            # Lees gegevens direct
+            self.read_public_data_direct()
             
         except Exception as e:
-            self.dialog.after(0, lambda: self.handle_reading_error(str(e)))
+            messagebox.showerror("EID Fout", f"Kon EID niet uitlezen:\n\n{str(e)}")
+    
+    def read_public_data_direct(self):
+        """Lees EID gegevens en toon direct resultaten"""
+        try:
+            # Selecteer gewenste velden
+            selected_fields = {field: info for field, info in self.eid_reader.available_fields.items() 
+                             if info['selected']}
+            
+            # Lees EID data zonder PIN
+            eid_data = self.eid_reader.read_full_eid_data(pin_code=None)
+            
+            # Toon resultaten direct
+            self.show_eid_results(eid_data)
+            
+        except Exception as e:
+            messagebox.showerror("EID Fout", f"Kon EID niet uitlezen:\n\n{str(e)}")
     
     def read_card_with_pin_thread(self):
         """Lees kaart met PIN voor certificaten"""
@@ -964,12 +968,17 @@ class EIDReaderDialog:
         main_frame = ttk.Frame(results_window, padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Header
-        ttk.Label(main_frame, text="📋 EID Gegevens - Selecteer te Overzetten Velden", 
-                 font=('Arial', 16, 'bold')).pack(pady=(0, 10))
-        
-        ttk.Label(main_frame, text="Vink aan welke gegevens je wilt overzetten naar het patiëntenprofiel:", 
-                 font=('Arial', 11)).pack(pady=(0, 20))
+        # Header afhankelijk van mode
+        if self.update_mode and self.patient_id:
+            ttk.Label(main_frame, text="🔄 EID Update - Selecteer Gegevens om Bij te Werken", 
+                     font=('Arial', 16, 'bold')).pack(pady=(0, 10))
+            ttk.Label(main_frame, text="Vink aan welke gegevens je wilt bijwerken in het patiëntenprofiel:", 
+                     font=('Arial', 11)).pack(pady=(0, 20))
+        else:
+            ttk.Label(main_frame, text="📋 EID Gegevens - Selecteer te Overzetten Velden", 
+                     font=('Arial', 16, 'bold')).pack(pady=(0, 10))
+            ttk.Label(main_frame, text="Vink aan welke gegevens je wilt overzetten naar het patiëntenprofiel:", 
+                     font=('Arial', 11)).pack(pady=(0, 20))
         
         # Selectie knoppen
         selection_frame = ttk.Frame(main_frame)
@@ -1141,16 +1150,23 @@ class EIDReaderDialog:
             except Exception as e:
                 messagebox.showerror("Export Fout", f"Kon niet exporteren: {str(e)}")
         
-        # Aanpassing knop tekst voor update mode
-        save_button_text = "🔄 Bijwerken Patiënt" if self.update_mode else "💾 Opslaan als Patiënt"
-        ttk.Button(button_frame, text=save_button_text, 
-                  command=save_to_patient_profile).pack(side=tk.LEFT, padx=(0, 10))
+        # Knoppen afhankelijk van mode
+        if self.update_mode and self.patient_id:
+            # Update mode - toon bijwerken knop
+            ttk.Button(button_frame, text="🔄 Patiënt Bijwerken", 
+                      command=save_to_patient_profile,
+                      style='Accent.TButton').pack(side=tk.LEFT, padx=(0, 10))
+        else:
+            # Nieuwe patiënt mode - toon opslaan knop
+            ttk.Button(button_frame, text="💾 Opslaan als Patiënt", 
+                      command=save_to_patient_profile,
+                      style='Accent.TButton').pack(side=tk.LEFT, padx=(0, 10))
         
         ttk.Button(button_frame, text="📤 Exporteren", 
                   command=export_to_file).pack(side=tk.LEFT, padx=(0, 10))
         
         ttk.Button(button_frame, text="🔄 Opnieuw Lezen", 
-                  command=lambda: [results_window.destroy(), self.show_field_selection_dialog()]).pack(side=tk.LEFT, padx=(0, 10))
+                  command=lambda: [results_window.destroy(), show_eid_reader_dialog(self.parent, self.patient_management, self.update_mode, self.patient_id)]).pack(side=tk.LEFT, padx=(0, 10))
         
         ttk.Button(button_frame, text="❌ Sluiten", 
                   command=results_window.destroy).pack(side=tk.LEFT)
@@ -1199,14 +1215,15 @@ def show_eid_not_available():
     )
 
 def show_eid_reader_dialog(parent, patient_management=None, update_mode=False, patient_id=None):
-    """Hoofdfunctie om EID reader dialoog te tonen"""
+    """Hoofdfunctie om EID reader dialoog te tonen - direct uitlezen"""
     try:
         if not SMARTCARD_AVAILABLE:
             show_eid_not_available()
             return
             
         dialog = EIDReaderDialog(parent, patient_management, update_mode, patient_id)
-        dialog.show_field_selection_dialog()
+        # Skip selectie dialoog en ga direct naar uitlezen
+        dialog.begin_card_reading()
         
     except Exception as e:
         messagebox.showerror("EID Reader Fout", f"Kon EID reader niet starten: {str(e)}")
