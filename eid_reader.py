@@ -446,32 +446,143 @@ class BelgianEIDReader:
         raise Exception("Geen adresfile gevonden")
     
     def generate_generic_card_data(self):
-        """Gebruik echte EID gegevens van de werkende reader"""
-        from datetime import datetime
+        """Probeer echte data te lezen met alternatieve methoden"""
+        print("🔍 Probeer alternatieve kaart data extractie...")
         
-        # Gebruik de echte gegevens die we zien van jouw EID kaart
-        identity_data = {
-            'card_number': 'VERHEYEN-EID-2430',
-            'surname': 'Verheyen',
-            'first_names': 'Danny Miriam W',
-            'birth_date': '29/03/1994',
-            'sex': 'M',
-            'nationality': 'Belg',
-            'birth_location': 'Brasschaat',
-            'national_number': '94.03.29-219.33',
-            'card_validity_begin': '01/01/2020',
-            'card_validity_end': '31/12/2030'
-        }
+        identity_data = {}
+        address_data = {}
         
-        address_data = {
-            'street_and_number': 'Het Vekenblok 2',
-            'zip_code': '2430',
-            'municipality': 'Laakdal'
-        }
+        # Probeer verschillende APDU methoden om echte data te krijgen
+        try:
+            # Probeer andere EID file selecties
+            alternative_apdus = [
+                # Nederlandse EID
+                [0x00, 0xA4, 0x04, 0x0C, 0x0E, 0xA0, 0x00, 0x00, 0x00, 0x77, 0x01, 0x08, 0x00, 0x07, 0x00, 0x00, 0xFE, 0x00, 0x00, 0x01, 0x00],
+                # Duitse EID
+                [0x00, 0xA4, 0x04, 0x0C, 0x0A, 0xE8, 0x28, 0xBD, 0x08, 0x0F, 0xF2, 0x50, 0x4F, 0x54, 0x20],
+                # Europese EID standaard
+                [0x00, 0xA4, 0x04, 0x00, 0x0C, 0xA0, 0x00, 0x00, 0x01, 0x67, 0x45, 0x53, 0x49, 0x47, 0x4E],
+                # Basic card info
+                [0x00, 0xCA, 0x9F, 0x7F, 0x00],
+                # Card serial
+                [0x80, 0xCA, 0x9F, 0x7F, 0x00],
+                # ATR info
+                [0x00, 0xCA, 0x01, 0x00, 0x00]
+            ]
+            
+            for apdu in alternative_apdus:
+                try:
+                    response = self.send_apdu(apdu)
+                    if response and len(response) > 2:
+                        # Parse response voor echte data
+                        data_str = self.parse_card_response(response)
+                        if data_str:
+                            print(f"✅ Gevonden kaart data: {data_str[:50]}...")
+                            # Probeer data te parsen
+                            parsed = self.extract_personal_info(data_str)
+                            if parsed:
+                                identity_data.update(parsed)
+                                break
+                except:
+                    continue
+            
+            # Als nog geen data, probeer kaart ATR info
+            if not identity_data:
+                identity_data = self.get_card_atr_info()
+            
+        except Exception as e:
+            print(f"⚠️ Alternatieve methoden faalden: {e}")
         
-        print("✅ EID gegevens succesvol uitgelezen en beschikbaar voor selectie")
+        # Als nog steeds geen data, gebruik minimale fallback
+        if not identity_data:
+            print("⚠️ Geen kaart data gevonden - gebruik handmatige invoer")
+            identity_data = {
+                'card_number': 'ONBEKEND',
+                'surname': 'NIET_UITGELEZEN',
+                'first_names': 'HANDMATIG_INVOEREN',
+                'birth_date': 'DD/MM/YYYY',
+                'sex': 'Onbekend',
+                'nationality': 'Onbekend',
+                'birth_location': 'Onbekend',
+                'national_number': 'NIET_BESCHIKBAAR'
+            }
+            
+            address_data = {
+                'street_and_number': 'HANDMATIG_INVOEREN',
+                'zip_code': '0000',
+                'municipality': 'ONBEKEND'
+            }
+        
+        print("✅ Kaart data extraction voltooid")
         return identity_data, address_data
     
+    def parse_card_response(self, response):
+        """Parse kaart response naar leesbare data"""
+        try:
+            # Converteer naar string
+            if isinstance(response, list):
+                # Filter status bytes (laatste 2)
+                data_bytes = response[:-2] if len(response) > 2 else response
+                # Probeer als ASCII
+                try:
+                    return ''.join(chr(b) for b in data_bytes if 32 <= b <= 126)
+                except:
+                    return ''.join(f'{b:02X}' for b in data_bytes)
+            return str(response)
+        except:
+            return None
+    
+    def extract_personal_info(self, data_str):
+        """Extraheer persoonlijke info uit kaart data string"""
+        try:
+            import re
+            info = {}
+            
+            # Zoek naar datum patronen (DD/MM/YYYY)
+            dates = re.findall(r'\b\d{2}/\d{2}/\d{4}\b', data_str)
+            if dates:
+                info['birth_date'] = dates[0]
+            
+            # Zoek naar nationale nummer patronen
+            nat_nums = re.findall(r'\b\d{2}\.\d{2}\.\d{2}-\d{3}\.\d{2}\b', data_str)
+            if nat_nums:
+                info['national_number'] = nat_nums[0]
+            
+            # Zoek naar namen (capitalized words)
+            names = re.findall(r'\b[A-Z][a-z]+\b', data_str)
+            if len(names) >= 2:
+                info['surname'] = names[0]
+                info['first_names'] = ' '.join(names[1:3])
+            
+            return info if info else None
+        except:
+            return None
+    
+    def get_card_atr_info(self):
+        """Krijg basis kaart info van ATR"""
+        try:
+            if hasattr(self.card_connection, 'connection'):
+                atr = str(self.card_connection.connection.getATR())
+                print(f"📋 Kaart ATR: {atr}")
+                
+                # Genereer unieke identifier van ATR
+                import hashlib
+                card_id = hashlib.md5(atr.encode()).hexdigest()[:8].upper()
+                
+                return {
+                    'card_number': f'KAART-{card_id}',
+                    'surname': f'ONBEKEND-{card_id[:4]}',
+                    'first_names': 'HANDMATIG_INVOEREN',
+                    'birth_date': 'DD/MM/YYYY',
+                    'sex': 'Onbekend',
+                    'nationality': 'Te_bepalen',
+                    'birth_location': 'Onbekend',
+                    'national_number': f'ATR-{card_id}'
+                }
+        except:
+            pass
+        return {}
+
     def verify_pin(self, pin_code):
         """Verifieer PIN code op echte EID kaart"""
         try:
